@@ -169,6 +169,7 @@ checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 [[package]]
 name = "azlin-core"
 version = "2.6.24"
+source = "git+https://github.com/rysweet/azlin#caf371870acbfe6d66cf64e3f3c4e0b2a94e2a93"
 dependencies = [
  "anyhow",
  "chrono",
@@ -186,6 +187,7 @@ dependencies = [
 [[package]]
 name = "azlin-ssh"
 version = "2.6.24"
+source = "git+https://github.com/rysweet/azlin#caf371870acbfe6d66cf64e3f3c4e0b2a94e2a93"
 dependencies = [
  "anyhow",
  "async-trait",

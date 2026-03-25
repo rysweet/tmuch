@@ -19,4 +19,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "process
 shellexpand = "3"
 
 # SSH via azlin-ssh (reuses production SSH pool, client, key management)
-azlin-ssh = { path = "../azlin/rust/crates/azlin-ssh" }
+# Uses git dep for CI; local dev can override with:
+#   [patch.'https://github.com/rysweet/azlin']
+#   azlin-ssh = { path = "../azlin/rust/crates/azlin-ssh" }
+azlin-ssh = { git = "https://github.com/rysweet/azlin" }
