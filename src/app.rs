@@ -95,7 +95,6 @@ impl App {
         }
         Ok(())
     }
-
 }
 
 pub fn run(config: Config, initial_sessions: Vec<String>, new_commands: Vec<String>) -> Result<()> {
@@ -141,9 +140,15 @@ pub fn run(config: Config, initial_sessions: Vec<String>, new_commands: Vec<Stri
         let term_size = terminal.size()?;
         let pane_count = app.pane_manager.count();
         if pane_count > 0 {
-            let rects = crate::layout::compute(pane_count, ratatui::layout::Rect::new(
-                0, 0, term_size.width, term_size.height.saturating_sub(1),
-            ));
+            let rects = crate::layout::compute(
+                pane_count,
+                ratatui::layout::Rect::new(
+                    0,
+                    0,
+                    term_size.width,
+                    term_size.height.saturating_sub(1),
+                ),
+            );
             for (i, pane) in app.pane_manager.panes_mut().iter_mut().enumerate() {
                 if let Some(rect) = rects.get(i) {
                     // Inner area (minus borders)
