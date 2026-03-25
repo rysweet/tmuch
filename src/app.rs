@@ -1,7 +1,12 @@
 use crate::config::Config;
 use crate::keys::{self, Action, Mode};
+use crate::layouts;
 use crate::pane::PaneManager;
 use crate::session_picker::SessionPicker;
+use crate::source::command::CommandSource;
+use crate::source::local_tmux::LocalTmuxSource;
+use crate::source::tail::TailSource;
+use crate::source::{self, NewPaneRequest, PaneSpec};
 use crate::tmux;
 use crate::ui;
 use anyhow::Result;
@@ -32,14 +37,52 @@ impl App {
         }
     }
 
-    pub fn attach_session(&mut self, name: &str, owned: bool) {
-        self.pane_manager.add(name.to_string(), owned);
+    pub fn add_local_tmux(&mut self, name: &str, owned: bool) {
+        let source = if owned {
+            // Already created externally
+            LocalTmuxSource::attach(name.to_string())
+        } else {
+            LocalTmuxSource::attach(name.to_string())
+        };
+        self.pane_manager.add(Box::new(source));
     }
 
-    pub fn create_and_attach(&mut self, command: Option<&str>) -> Result<()> {
+    pub fn create_local_tmux(&mut self, command: Option<&str>) -> Result<()> {
         let name = tmux::generate_session_name();
-        tmux::create_session(&name, command)?;
-        self.pane_manager.add(name, true);
+        let source = LocalTmuxSource::create(name, command)?;
+        self.pane_manager.add(Box::new(source));
+        Ok(())
+    }
+
+    pub fn add_from_spec(&mut self, spec: &PaneSpec) -> Result<()> {
+        match spec {
+            PaneSpec::LocalTmux {
+                session,
+                create_cmd,
+            } => {
+                if tmux::session_exists(session) {
+                    self.pane_manager
+                        .add(Box::new(LocalTmuxSource::attach(session.clone())));
+                } else if let Some(cmd) = create_cmd {
+                    let source = LocalTmuxSource::create(session.clone(), Some(cmd))?;
+                    self.pane_manager.add(Box::new(source));
+                } else {
+                    let source = LocalTmuxSource::create(session.clone(), None)?;
+                    self.pane_manager.add(Box::new(source));
+                }
+            }
+            PaneSpec::Command {
+                command,
+                interval_ms,
+            } => {
+                let source = CommandSource::new(command.clone(), *interval_ms);
+                self.pane_manager.add(Box::new(source));
+            }
+            PaneSpec::Tail { path } => {
+                let source = TailSource::new(path)?;
+                self.pane_manager.add(Box::new(source));
+            }
+        }
         Ok(())
     }
 
@@ -47,20 +90,19 @@ impl App {
         match action {
             Action::Quit => self.should_quit = true,
             Action::AddPane => {
-                self.create_and_attach(None)?;
+                self.create_local_tmux(None)?;
             }
             Action::DropPane => {
-                if let Some(pane) = self.pane_manager.remove_focused() {
-                    if pane.owned {
-                        let _ = tmux::kill_session(&pane.session_name);
-                    }
-                }
+                // Pane::drop() calls source.cleanup()
+                self.pane_manager.remove_focused();
             }
             Action::FocusNext => self.pane_manager.focus_next(),
             Action::FocusPrev => self.pane_manager.focus_prev(),
             Action::EnterPaneMode => {
-                if self.pane_manager.focused().is_some() {
-                    self.mode = Mode::PaneFocused;
+                if let Some(pane) = self.pane_manager.focused() {
+                    if pane.is_interactive() {
+                        self.mode = Mode::PaneFocused;
+                    }
                 }
             }
             Action::ExitPaneMode => {
@@ -75,7 +117,8 @@ impl App {
             Action::PickerConfirm => {
                 if let Some(session) = self.picker.confirm() {
                     let name = session.name.clone();
-                    self.pane_manager.add(name, false);
+                    self.pane_manager
+                        .add(Box::new(LocalTmuxSource::attach(name)));
                 }
                 self.mode = Mode::Normal;
             }
@@ -84,12 +127,12 @@ impl App {
             }
             Action::RunBinding(cmd) => {
                 let name = tmux::generate_session_name();
-                tmux::create_session(&name, Some(&cmd))?;
-                self.pane_manager.add(name, true);
+                let source = LocalTmuxSource::create(name, Some(&cmd))?;
+                self.pane_manager.add(Box::new(source));
             }
             Action::SendKeys(keys) => {
-                if let Some(pane) = self.pane_manager.focused() {
-                    let _ = tmux::send_keys(&pane.session_name, &keys);
+                if let Some(pane) = self.pane_manager.focused_mut() {
+                    let _ = pane.source.send_keys(&keys);
                 }
             }
         }
@@ -97,7 +140,13 @@ impl App {
     }
 }
 
-pub fn run(config: Config, initial_sessions: Vec<String>, new_commands: Vec<String>) -> Result<()> {
+pub fn run(
+    config: Config,
+    initial_sessions: Vec<String>,
+    new_commands: Vec<String>,
+    layout: Option<String>,
+    save_layout: Option<String>,
+) -> Result<()> {
     // Setup terminal
     terminal::enable_raw_mode()?;
     io::stdout().execute(EnterAlternateScreen)?;
@@ -106,30 +155,49 @@ pub fn run(config: Config, initial_sessions: Vec<String>, new_commands: Vec<Stri
 
     let mut app = App::new(config);
 
-    // Attach initial sessions
-    for name in &initial_sessions {
-        if tmux::session_exists(name) {
-            app.attach_session(name, false);
-        } else {
-            eprintln!("warning: tmux session '{}' not found, skipping", name);
+    // Load layout if specified
+    if let Some(layout_name) = &layout {
+        let spec = layouts::load(layout_name)?;
+        for pane_spec in &spec.panes {
+            app.add_from_spec(pane_spec)?;
         }
-    }
+    } else {
+        // Attach initial sessions
+        for name in &initial_sessions {
+            if tmux::session_exists(name) {
+                app.add_local_tmux(name, false);
+            }
+        }
 
-    // Create sessions for new commands
-    for cmd in &new_commands {
-        app.create_and_attach(Some(cmd))?;
-    }
+        // Create panes for new commands (supports watch:/tail: prefixes)
+        for cmd in &new_commands {
+            match source::parse_new_arg(cmd) {
+                NewPaneRequest::TmuxCommand { command } => {
+                    app.create_local_tmux(Some(&command))?;
+                }
+                NewPaneRequest::Command {
+                    command,
+                    interval_ms,
+                } => {
+                    let source = CommandSource::new(command, interval_ms);
+                    app.pane_manager.add(Box::new(source));
+                }
+                NewPaneRequest::Tail { path } => {
+                    let source = TailSource::new(&path)?;
+                    app.pane_manager.add(Box::new(source));
+                }
+            }
+        }
 
-    // If no panes, open session picker or create a default
-    if app.pane_manager.is_empty() {
-        let sessions = tmux::list_sessions()?;
-        if sessions.is_empty() {
-            // Create a default session
-            app.create_and_attach(None)?;
-        } else {
-            // Open picker
-            app.picker.refresh()?;
-            app.mode = Mode::SessionPicker;
+        // If no panes, open session picker or create a default
+        if app.pane_manager.is_empty() {
+            let sessions = tmux::list_sessions()?;
+            if sessions.is_empty() {
+                app.create_local_tmux(None)?;
+            } else {
+                app.picker.refresh()?;
+                app.mode = Mode::SessionPicker;
+            }
         }
     }
 
@@ -151,11 +219,10 @@ pub fn run(config: Config, initial_sessions: Vec<String>, new_commands: Vec<Stri
             );
             for (i, pane) in app.pane_manager.panes_mut().iter_mut().enumerate() {
                 if let Some(rect) = rects.get(i) {
-                    // Inner area (minus borders)
                     let w = rect.width.saturating_sub(2);
                     let h = rect.height.saturating_sub(2);
                     if w > 0 && h > 0 {
-                        if let Ok(content) = tmux::capture_pane(&pane.session_name, w, h) {
+                        if let Ok(content) = pane.source.capture(w, h) {
                             pane.content = content;
                         }
                     }
@@ -178,6 +245,20 @@ pub fn run(config: Config, initial_sessions: Vec<String>, new_commands: Vec<Stri
                 }
             }
         }
+    }
+
+    // Save layout if requested
+    if let Some(layout_name) = save_layout {
+        let specs: Vec<PaneSpec> = app
+            .pane_manager
+            .panes()
+            .iter()
+            .map(|p| p.source.to_spec())
+            .collect();
+        layouts::save(&layouts::LayoutSpec {
+            name: layout_name,
+            panes: specs,
+        })?;
     }
 
     // Cleanup

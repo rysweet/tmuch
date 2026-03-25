@@ -30,10 +30,13 @@ pub fn draw(frame: &mut Frame, app: &App) {
                 Color::DarkGray
             };
 
+            let label = pane.source_label();
             let title = if is_focused && app.mode == Mode::PaneFocused {
-                format!(" {} [ATTACHED] ", pane.session_name)
+                format!(" {} [ATTACHED] ", pane.name())
+            } else if label != "local" {
+                format!(" {} [{}] ", pane.name(), label)
             } else {
-                format!(" {} ", pane.session_name)
+                format!(" {} ", pane.name())
             };
 
             let block = Block::default()
@@ -73,7 +76,7 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
             "[{}/{}] {}",
             app.pane_manager.focused_index() + 1,
             app.pane_manager.count(),
-            pane.session_name
+            pane.name()
         )
     } else {
         format!("[0/{}]", app.pane_manager.count())
