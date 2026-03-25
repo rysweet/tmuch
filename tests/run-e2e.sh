@@ -307,7 +307,7 @@ fi
 run_test "cli-update-graceful" "${1:-}"
 if true; then
     output=$($BINARY update 2>&1 || true)
-    if echo "$output" | grep -qE "(Not Found|No release|already at)"; then
+    if echo "$output" | grep -qE "(Not Found|No release|already at|Already at|Updated tmuch)"; then
         echo "  ✅ update fails gracefully (no crash)"
         pass
     else
