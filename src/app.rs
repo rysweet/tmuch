@@ -11,12 +11,14 @@ use crate::source::{self, NewPaneRequest, PaneSpec};
 use crate::tmux;
 use crate::ui;
 use anyhow::Result;
+use azlin_ssh::SshPool;
 use crossterm::event::{self, Event};
 use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
 use crossterm::ExecutableCommand;
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 use std::io;
+use std::sync::Arc;
 use std::time::Duration;
 
 pub struct App {
@@ -26,6 +28,7 @@ pub struct App {
     pub picker: SessionPicker,
     pub should_quit: bool,
     pub tokio_handle: tokio::runtime::Handle,
+    pub ssh_pool: Arc<SshPool>,
 }
 
 impl App {
@@ -37,6 +40,7 @@ impl App {
             picker: SessionPicker::new(),
             should_quit: false,
             tokio_handle,
+            ssh_pool: Arc::new(SshPool::default()),
         }
     }
 
@@ -96,8 +100,12 @@ impl App {
                     .find(|r| r.name == *remote_name)
                     .ok_or_else(|| anyhow::anyhow!("Remote '{}' not found in config", remote_name))?
                     .clone();
-                let rt = self.tokio_handle.clone();
-                let source = SshTmuxSource::new(remote, session.clone(), &rt);
+                let source = SshTmuxSource::new(
+                    remote,
+                    session.clone(),
+                    Arc::clone(&self.ssh_pool),
+                    &self.tokio_handle,
+                );
                 self.pane_manager.add(Box::new(source));
             }
         }
@@ -133,7 +141,12 @@ impl App {
                 poll_interval_ms: 500,
             });
 
-        let source = SshTmuxSource::new(remote, session.to_string(), &self.tokio_handle);
+        let source = SshTmuxSource::new(
+            remote,
+            session.to_string(),
+            Arc::clone(&self.ssh_pool),
+            &self.tokio_handle,
+        );
         self.pane_manager.add(Box::new(source));
         Ok(())
     }
@@ -164,8 +177,11 @@ impl App {
                 if self.config.remote.is_empty() {
                     self.picker.refresh()?;
                 } else {
-                    self.picker
-                        .refresh_with_remotes(&self.config.remote, &self.tokio_handle)?;
+                    self.picker.refresh_with_remotes(
+                        &self.config.remote,
+                        &self.ssh_pool,
+                        &self.tokio_handle,
+                    )?;
                 }
                 self.mode = Mode::SessionPicker;
             }
@@ -179,7 +195,12 @@ impl App {
                         if let Some(remote) =
                             self.config.remote.iter().find(|r| r.name == *host).cloned()
                         {
-                            let source = SshTmuxSource::new(remote, name, &self.tokio_handle);
+                            let source = SshTmuxSource::new(
+                                remote,
+                                name,
+                                Arc::clone(&self.ssh_pool),
+                                &self.tokio_handle,
+                            );
                             self.pane_manager.add(Box::new(source));
                         }
                     } else {

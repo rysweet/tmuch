@@ -1,6 +1,8 @@
 use crate::source::ssh_tmux::RemoteConfig;
 use crate::tmux::{self, SessionInfo};
 use anyhow::Result;
+use azlin_ssh::SshPool;
+use std::sync::Arc;
 
 pub struct SessionPicker {
     pub sessions: Vec<SessionInfo>,
@@ -27,15 +29,16 @@ impl SessionPicker {
     pub fn refresh_with_remotes(
         &mut self,
         remotes: &[RemoteConfig],
+        pool: &Arc<SshPool>,
         rt: &tokio::runtime::Handle,
     ) -> Result<()> {
         // Local sessions first
         self.sessions = tmux::list_sessions()?;
 
-        // Remote sessions (fetch in parallel via tokio)
+        // Remote sessions
         for remote in remotes {
             let remote = remote.clone();
-            let result = rt.block_on(crate::source::ssh_tmux::list_remote_sessions(&remote));
+            let result = rt.block_on(crate::source::ssh_tmux::list_remote_sessions(pool, &remote));
             match result {
                 Ok(names) => {
                     for name in names {
