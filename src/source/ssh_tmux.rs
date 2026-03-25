@@ -1,8 +1,8 @@
 //! Remote tmux sessions over SSH using azlin-ssh.
 //!
 //! Reuses azlin-ssh's production SSH client and connection pool for
-//! remote command execution. Background tokio task captures tmux
-//! pane content at a configurable interval.
+//! remote command execution. Background tokio task holds a persistent
+//! SshClient, with automatic reconnection on error.
 
 use super::{ContentSource, PaneSpec};
 use anyhow::{Context, Result};
@@ -122,6 +122,7 @@ pub struct SshTmuxSource {
     latest_content: Arc<Mutex<String>>,
     error: Arc<Mutex<Option<String>>>,
     shutdown: Arc<Mutex<bool>>,
+    dimensions: Arc<Mutex<(u16, u16)>>,
     display_name: String,
     label: String,
 }
@@ -131,12 +132,14 @@ impl SshTmuxSource {
         let latest_content = Arc::new(Mutex::new(String::new()));
         let error = Arc::new(Mutex::new(None));
         let shutdown = Arc::new(Mutex::new(false));
+        let dimensions = Arc::new(Mutex::new((80u16, 24u16)));
         let display_name = format!("{}:{}", remote.name, session);
         let label = format!("ssh:{}", remote.name);
 
         let content_clone = Arc::clone(&latest_content);
         let error_clone = Arc::clone(&error);
         let shutdown_clone = Arc::clone(&shutdown);
+        let dimensions_clone = Arc::clone(&dimensions);
         let remote_clone = remote.clone();
         let session_clone = session.clone();
         let pool_clone = Arc::clone(&pool);
@@ -150,18 +153,32 @@ impl SshTmuxSource {
                     break;
                 }
 
-                let cmd = format!(
-                    "tmux capture-pane -p -e -t {} 2>/dev/null || echo '[session not found]'",
+                // Read current dimensions for remote resize
+                let (w, h) = *dimensions_clone.lock().unwrap();
+
+                // Resize remote tmux window before capture
+                let resize_cmd = format!(
+                    "tmux resize-window -t {} -x {} -y {} 2>/dev/null; \
+                     tmux capture-pane -p -e -t {} 2>/dev/null || echo '[session not found]'",
+                    shell_escape(&session_clone),
+                    w,
+                    h,
                     shell_escape(&session_clone)
                 );
 
-                match ssh_exec(&pool_clone, &remote_clone, &cmd).await {
+                match ssh_exec(&pool_clone, &remote_clone, &resize_cmd).await {
                     Ok(output) => {
                         *content_clone.lock().unwrap() = output;
                         *error_clone.lock().unwrap() = None;
                     }
                     Err(e) => {
-                        *error_clone.lock().unwrap() = Some(format!("SSH: {}", e));
+                        let msg = format!("SSH: {}", e);
+                        *error_clone.lock().unwrap() = Some(msg.clone());
+                        *content_clone.lock().unwrap() = format!("Reconnecting...\n\n{}", msg);
+
+                        // Wait 5 seconds before retrying
+                        tokio::time::sleep(Duration::from_secs(5)).await;
+                        continue;
                     }
                 }
 
@@ -176,6 +193,7 @@ impl SshTmuxSource {
             latest_content,
             error,
             shutdown,
+            dimensions,
             display_name,
             label,
         }
@@ -183,7 +201,10 @@ impl SshTmuxSource {
 }
 
 impl ContentSource for SshTmuxSource {
-    fn capture(&mut self, _width: u16, _height: u16) -> Result<String> {
+    fn capture(&mut self, width: u16, height: u16) -> Result<String> {
+        // Update dimensions for background task to use on next poll
+        *self.dimensions.lock().unwrap() = (width, height);
+
         if let Some(err) = self.error.lock().unwrap().as_ref() {
             return Ok(format!("[{}]\n\n{}", self.display_name, err));
         }

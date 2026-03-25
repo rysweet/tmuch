@@ -1,6 +1,6 @@
 [package]
 name = "tmuch"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "TUI tmux multiplexer - display multiple tmux sessions in a single terminal"
 license = "MIT"
@@ -10,6 +10,7 @@ ratatui = "0.29"
 crossterm = "0.28"
 ansi-to-tui = "7"
 clap = { version = "4", features = ["derive"] }
+clap_complete = "4"
 toml = "0.8"
 serde = { version = "1", features = ["derive"] }
 anyhow = "1"

@@ -4,6 +4,7 @@ use crate::layouts;
 use crate::pane::PaneManager;
 use crate::session_picker::SessionPicker;
 use crate::source::command::CommandSource;
+use crate::source::http::HttpSource;
 use crate::source::local_tmux::LocalTmuxSource;
 use crate::source::ssh_tmux::{RemoteConfig, SshTmuxSource};
 use crate::source::tail::TailSource;
@@ -87,6 +88,10 @@ impl App {
             }
             PaneSpec::Tail { path } => {
                 let source = TailSource::new(path)?;
+                self.pane_manager.add(Box::new(source));
+            }
+            PaneSpec::Http { url, interval_ms } => {
+                let source = HttpSource::new(url.clone(), *interval_ms);
                 self.pane_manager.add(Box::new(source));
             }
             PaneSpec::Remote {
@@ -224,9 +229,173 @@ impl App {
                     let _ = pane.source.send_keys(&keys);
                 }
             }
+            Action::DiscoverAzlin => {
+                // Open picker pre-populated with azlin VM sessions
+                if self.config.azlin.enabled {
+                    self.picker.refresh_with_remotes(
+                        &self.config.remote,
+                        &self.config.azlin,
+                        &self.ssh_pool,
+                        &self.tokio_handle,
+                    )?;
+                } else {
+                    // Even without azlin config, try discovery
+                    let azlin_cfg = crate::azlin_integration::AzlinConfig {
+                        enabled: true,
+                        resource_group: None,
+                    };
+                    self.picker.refresh_with_remotes(
+                        &self.config.remote,
+                        &azlin_cfg,
+                        &self.ssh_pool,
+                        &self.tokio_handle,
+                    )?;
+                }
+                self.mode = Mode::SessionPicker;
+            }
+            Action::PickerAddAll => {
+                let sessions: Vec<_> = self.picker.sessions.clone();
+                for session in &sessions {
+                    let name = session.name.clone();
+                    if let Some(host) = &session.host {
+                        if let Some(remote) =
+                            self.config.remote.iter().find(|r| r.name == *host).cloned()
+                        {
+                            let source = SshTmuxSource::new(
+                                remote,
+                                name,
+                                Arc::clone(&self.ssh_pool),
+                                &self.tokio_handle,
+                            );
+                            self.pane_manager.add(Box::new(source));
+                        }
+                    } else {
+                        self.pane_manager
+                            .add(Box::new(LocalTmuxSource::attach(name)));
+                    }
+                }
+                self.mode = Mode::Normal;
+            }
         }
         Ok(())
     }
+}
+
+/// Run azlin discovery: list all VMs and their tmux sessions, then launch TUI.
+pub fn run_azlin(resource_group: Option<String>) -> Result<()> {
+    let config = crate::config::load()?;
+    let rt = tokio::runtime::Runtime::new()?;
+    let handle = rt.handle().clone();
+    let ssh_pool = Arc::new(SshPool::default());
+
+    eprintln!("Discovering Azure VMs...");
+    let vms = crate::azlin_integration::discover_vms(resource_group.as_deref())?;
+
+    if vms.is_empty() {
+        eprintln!("No running VMs found.");
+        return Ok(());
+    }
+
+    eprintln!(
+        "Found {} running VM(s). Listing tmux sessions...",
+        vms.len()
+    );
+
+    let mut all_sessions = Vec::new();
+    for vm in &vms {
+        let remote = match crate::azlin_integration::vm_to_remote_config(vm) {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("  Skipping {}: {}", vm.name, e);
+                continue;
+            }
+        };
+        let result = handle.block_on(crate::source::ssh_tmux::list_remote_sessions(
+            &ssh_pool, &remote,
+        ));
+        match result {
+            Ok(sessions) => {
+                for sess in sessions {
+                    eprintln!("  {}:{}", vm.name, sess);
+                    all_sessions.push((remote.clone(), sess));
+                }
+            }
+            Err(e) => {
+                eprintln!("  {}: SSH error: {}", vm.name, e);
+            }
+        }
+    }
+
+    if all_sessions.is_empty() {
+        eprintln!("No tmux sessions found on any VM.");
+        return Ok(());
+    }
+
+    // Launch TUI with all discovered sessions
+    terminal::enable_raw_mode()?;
+    io::stdout().execute(EnterAlternateScreen)?;
+    let backend = CrosstermBackend::new(io::stdout());
+    let mut terminal = Terminal::new(backend)?;
+
+    let mut app = App::new(config, handle);
+    app.ssh_pool = ssh_pool;
+
+    for (remote, session) in &all_sessions {
+        let source = SshTmuxSource::new(
+            remote.clone(),
+            session.clone(),
+            Arc::clone(&app.ssh_pool),
+            &app.tokio_handle,
+        );
+        app.pane_manager.add(Box::new(source));
+    }
+
+    let poll_duration = Duration::from_millis(app.config.display.poll_interval_ms);
+
+    loop {
+        let term_size = terminal.size()?;
+        let pane_count = app.pane_manager.count();
+        if pane_count > 0 {
+            let rects = crate::layout::compute(
+                pane_count,
+                ratatui::layout::Rect::new(
+                    0,
+                    0,
+                    term_size.width,
+                    term_size.height.saturating_sub(1),
+                ),
+            );
+            for (i, pane) in app.pane_manager.panes_mut().iter_mut().enumerate() {
+                if let Some(rect) = rects.get(i) {
+                    let w = rect.width.saturating_sub(2);
+                    let h = rect.height.saturating_sub(2);
+                    if w > 0 && h > 0 {
+                        if let Ok(content) = pane.source.capture(w, h) {
+                            pane.content = content;
+                        }
+                    }
+                }
+            }
+        }
+
+        terminal.draw(|frame| ui::draw(frame, &app))?;
+
+        if app.should_quit {
+            break;
+        }
+
+        if event::poll(poll_duration)? {
+            if let Event::Key(key) = event::read()? {
+                if let Some(action) = keys::handle(key, &app.mode, &app.config) {
+                    app.handle_action(action)?;
+                }
+            }
+        }
+    }
+
+    terminal::disable_raw_mode()?;
+    io::stdout().execute(LeaveAlternateScreen)?;
+    Ok(())
 }
 
 pub fn run(
@@ -282,6 +451,10 @@ pub fn run(
                 }
                 NewPaneRequest::Tail { path } => {
                     let source = TailSource::new(&path)?;
+                    app.pane_manager.add(Box::new(source));
+                }
+                NewPaneRequest::Http { url, interval_ms } => {
+                    let source = HttpSource::new(url, interval_ms);
                     app.pane_manager.add(Box::new(source));
                 }
             }
