@@ -53,6 +53,7 @@ fn handle_normal(event: KeyEvent, config: &Config) -> Option<Action> {
         KeyCode::Tab => Some(Action::FocusNext),
         KeyCode::BackTab => Some(Action::FocusPrev),
         KeyCode::Enter => Some(Action::EnterPaneMode),
+        KeyCode::Char('q') => Some(Action::Quit),
         KeyCode::Char(c) => {
             // Check command bindings
             config

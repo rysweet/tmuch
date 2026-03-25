@@ -83,7 +83,7 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     };
 
     let bindings_hint = if app.mode == Mode::Normal {
-        " | ^A:add ^D:drop ^S:list Tab:next Enter:focus"
+        " | q:quit ^A:add ^D:drop ^S:list ^Z:azlin Tab:next Enter:focus"
     } else if app.mode == Mode::PaneFocused {
         " | Esc:unfocus"
     } else {
