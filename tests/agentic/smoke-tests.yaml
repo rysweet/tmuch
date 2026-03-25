@@ -1,0 +1,51 @@
+scenario:
+  name: "tmuch CLI Smoke Tests"
+  description: "Verify basic CLI flags and subcommands work"
+  type: cli
+  tags: [smoke, critical]
+
+  prerequisites:
+    - "./target/release/tmuch binary exists"
+
+  steps:
+    - action: launch
+      target: "./target/release/tmuch"
+      args: ["--help"]
+      description: "Help flag shows usage"
+
+    - action: verify_output
+      contains: "TUI tmux multiplexer"
+
+    - action: verify_output
+      contains: "update"
+
+    - action: verify_output
+      contains: "--new"
+
+    - action: verify_output
+      contains: "--bind"
+
+    - action: verify_exit_code
+      expected: 0
+
+    - action: launch
+      target: "./target/release/tmuch"
+      args: ["--version"]
+      description: "Version flag shows version"
+
+    - action: verify_output
+      contains: "tmuch 0.1.0"
+
+    - action: verify_exit_code
+      expected: 0
+
+    - action: launch
+      target: "./target/release/tmuch"
+      args: ["update", "--help"]
+      description: "Update subcommand has help"
+
+    - action: verify_output
+      contains: "Update tmuch to the latest version"
+
+    - action: verify_exit_code
+      expected: 0
