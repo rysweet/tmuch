@@ -3,13 +3,12 @@
 //! Checks GitHub releases for newer versions and prints a one-line notice.
 //! Failures are silently ignored — never blocks or slows normal operation.
 
+use crate::consts::{sanitise_for_display, CURRENT_VERSION, GITHUB_REPO};
 use std::fs;
 use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const COOLDOWN_SECS: u64 = 86400; // 24 hours
-const GITHUB_REPO: &str = "rysweet/tmuch";
-const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn cache_path() -> Option<PathBuf> {
     dirs::config_dir().map(|d| d.join("tmuch").join("last_update_check"))
@@ -28,6 +27,15 @@ fn write_cache(version: &str) {
     if let Some(path) = cache_path() {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).ok();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                if let Ok(meta) = fs::metadata(parent) {
+                    let mut perms = meta.permissions();
+                    perms.set_mode(0o700);
+                    fs::set_permissions(parent, perms).ok();
+                }
+            }
         }
         let now = now_secs();
         fs::write(&path, format!("{}\n{}", version, now)).ok();
@@ -50,48 +58,76 @@ fn now_secs() -> u64 {
         .as_secs()
 }
 
-/// Query GitHub for the latest release tag.
-/// Uses `gh` CLI first (authenticated), falls back to `curl`.
-fn fetch_latest_version() -> Option<String> {
-    let output = std::process::Command::new("timeout")
-        .args([
-            "5",
-            "gh",
-            "api",
-            &format!("repos/{}/releases/latest", GITHUB_REPO),
-            "--jq",
-            ".tag_name",
-        ])
+/// Run a command with a timeout. Returns None if the command fails or times out.
+fn run_with_timeout(cmd: &str, args: &[&str], timeout: Duration) -> Option<Vec<u8>> {
+    let mut child = std::process::Command::new(cmd)
+        .args(args)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .or_else(|| {
-            std::process::Command::new("curl")
-                .args([
-                    "-sS",
-                    "--connect-timeout",
-                    "3",
-                    "--max-time",
-                    "5",
-                    "--max-filesize",
-                    "65536",
-                    "-H",
-                    "Accept: application/vnd.github+json",
-                    &format!(
-                        "https://api.github.com/repos/{}/releases/latest",
-                        GITHUB_REPO
-                    ),
-                ])
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::null())
-                .output()
-                .ok()
-                .filter(|o| o.status.success())
-        })?;
+        .spawn()
+        .ok()?;
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let start = std::time::Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() => {
+                return child.stdout.take().and_then(|mut s| {
+                    use std::io::Read;
+                    let mut buf = Vec::new();
+                    s.read_to_end(&mut buf).ok().map(|_| buf)
+                });
+            }
+            Ok(Some(_)) => return None, // exited with error
+            Ok(None) => {
+                if start.elapsed() > timeout {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return None;
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Err(_) => return None,
+        }
+    }
+}
+
+/// Query GitHub for the latest release tag.
+fn fetch_latest_version() -> Option<String> {
+    let api_url = format!("repos/{}/releases/latest", GITHUB_REPO);
+
+    // Try gh CLI first (authenticated, no rate limits)
+    let output = run_with_timeout(
+        "gh",
+        &["api", &api_url, "--jq", ".tag_name"],
+        Duration::from_secs(5),
+    )
+    .or_else(|| {
+        // Fall back to curl
+        let url = format!(
+            "https://api.github.com/repos/{}/releases/latest",
+            GITHUB_REPO
+        );
+        run_with_timeout(
+            "curl",
+            &[
+                "-sS",
+                "--proto",
+                "=https",
+                "--connect-timeout",
+                "3",
+                "--max-time",
+                "5",
+                "--max-filesize",
+                "65536",
+                "-H",
+                "Accept: application/vnd.github+json",
+                &url,
+            ],
+            Duration::from_secs(6),
+        )
+    })?;
+
+    let stdout = String::from_utf8_lossy(&output);
     let trimmed = stdout.trim().trim_matches('"');
 
     // Direct tag from gh --jq
@@ -100,7 +136,7 @@ fn fetch_latest_version() -> Option<String> {
         return Some(tag.to_string());
     }
 
-    // JSON object from curl (releases/latest returns a single object)
+    // JSON object from curl
     if let Ok(release) = serde_json::from_str::<serde_json::Value>(trimmed) {
         if let Some(tag) = release["tag_name"].as_str() {
             return Some(tag.strip_prefix('v').unwrap_or(tag).to_string());
@@ -134,10 +170,6 @@ fn is_newer(current: &str, latest: &str) -> bool {
     false
 }
 
-fn sanitise_for_display(s: &str) -> String {
-    s.chars().filter(|c| !c.is_ascii_control()).collect()
-}
-
 fn print_update_notice(latest: &str) {
     let safe = sanitise_for_display(latest);
     eprintln!(
@@ -167,34 +199,6 @@ pub fn check_for_updates() {
             write_cache(&latest);
         }
     });
-}
-
-/// Interactive update check. Returns newer version string or None.
-#[allow(dead_code)] // available for future interactive prompt integration
-pub fn check_for_updates_interactive() -> Option<String> {
-    if std::env::var("TMUCH_NO_UPDATE_CHECK").unwrap_or_default() == "1" {
-        return None;
-    }
-
-    let now = now_secs();
-
-    if let Some((cached_version, timestamp)) = read_cache() {
-        if now.saturating_sub(timestamp) < COOLDOWN_SECS {
-            if is_newer(CURRENT_VERSION, &cached_version) {
-                return Some(cached_version);
-            }
-            return None;
-        }
-    }
-
-    if let Some(latest) = fetch_latest_version() {
-        write_cache(&latest);
-        if is_newer(CURRENT_VERSION, &latest) {
-            return Some(latest);
-        }
-    }
-
-    None
 }
 
 #[cfg(test)]
@@ -234,23 +238,7 @@ mod tests {
     }
 
     #[test]
-    fn test_sanitise_strips_escape_sequences() {
-        assert_eq!(sanitise_for_display("1.0.0\x1b[2J"), "1.0.0[2J");
-    }
-
-    #[test]
-    fn test_sanitise_passes_normal_version() {
-        assert_eq!(sanitise_for_display("0.2.0"), "0.2.0");
-    }
-
-    #[test]
     fn test_cache_path_exists() {
         assert!(cache_path().is_some());
-    }
-
-    #[test]
-    fn test_current_version_valid() {
-        assert!(!CURRENT_VERSION.is_empty());
-        assert!(CURRENT_VERSION.contains('.'));
     }
 }

@@ -1,5 +1,6 @@
 mod app;
 mod config;
+mod consts;
 mod keys;
 mod layout;
 mod pane;
