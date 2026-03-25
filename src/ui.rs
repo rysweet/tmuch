@@ -87,7 +87,7 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     } else if app.mode == Mode::PaneFocused {
         " | Esc:unfocus"
     } else {
-        " | j/k:nav Enter:select Esc:cancel"
+        " | j/k:nav Enter:select a:all z:scan-azlin Esc:cancel"
     };
 
     let line = Line::from(vec![

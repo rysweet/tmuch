@@ -253,6 +253,30 @@ impl App {
                 }
                 self.mode = Mode::SessionPicker;
             }
+            Action::PickerScanAzlin => {
+                // Scan azlin VMs and add their sessions to the picker
+                let rg = self.config.azlin.resource_group.as_deref();
+                let result =
+                    self.tokio_handle
+                        .block_on(crate::azlin_integration::discover_remote_sessions(
+                            &self.ssh_pool,
+                            rg,
+                        ));
+                if let Ok(remote_sessions) = result {
+                    // Add to existing picker sessions (avoid duplicates)
+                    for session in remote_sessions {
+                        let already_listed = self
+                            .picker
+                            .sessions
+                            .iter()
+                            .any(|s| s.name == session.name && s.host == session.host);
+                        if !already_listed {
+                            self.picker.sessions.push(session);
+                        }
+                    }
+                }
+                // Stay in picker mode
+            }
             Action::PickerAddAll => {
                 let sessions: Vec<_> = self.picker.sessions.clone();
                 for session in &sessions {
