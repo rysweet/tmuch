@@ -113,7 +113,7 @@ if true; then
     assert_output_contains "$BINARY --help" "update" "help shows update command" && pass || fail
     assert_output_contains "$BINARY --help" "--new" "help shows --new flag" && pass || fail
     assert_output_contains "$BINARY --help" "--bind" "help shows --bind flag" && pass || fail
-    assert_output_contains "$BINARY --version" "tmuch 0.1.0" "version shows 0.1.0" && pass || fail
+    assert_output_contains "$BINARY --version" "tmuch 0.2.0" "version shows 0.2.0" && pass || fail
     assert_output_contains "$BINARY update --help" "Update tmuch" "update help works" && pass || fail
 fi
 
@@ -337,6 +337,129 @@ if true; then
     send C-q
     sleep 1
     cleanup
+fi
+
+# ============================================================
+# TEST 11: watch: prefix shows [cmd] label
+# ============================================================
+run_test "tui-watch-cmd" "${1:-}"
+if true; then
+    launch_tmuch "-n 'watch:date:1000'"
+    sleep 3
+    capture "test11-watch-cmd"
+    assert_screen_contains "[cmd]" "watch: prefix shows [cmd] label" && pass || fail
+    assert_screen_contains "date" "watch pane shows command name" && pass || fail
+
+    send C-q
+    sleep 1
+    cleanup
+fi
+
+# ============================================================
+# TEST 12: tail: shows appended content
+# ============================================================
+run_test "tui-tail-file" "${1:-}"
+if true; then
+    TAILFILE="/tmp/tmuch-e2e-tail-$$"
+    echo "initial-line" > "$TAILFILE"
+
+    launch_tmuch "-n 'tail:$TAILFILE'"
+    sleep 2
+    assert_screen_contains "initial-line" "tail shows initial content" && pass || fail
+
+    echo "appended-line" >> "$TAILFILE"
+    sleep 2
+    capture "test12-tail"
+    assert_screen_contains "appended-line" "tail shows appended content" && pass || fail
+
+    send C-q
+    sleep 1
+    rm -f "$TAILFILE"
+    cleanup
+fi
+
+# ============================================================
+# TEST 13: --save-layout + --layout round-trip
+# ============================================================
+run_test "layout-roundtrip" "${1:-}"
+if true; then
+    tmux new-session -d -s e2e-pane-a "sleep 300"
+    sleep 1
+
+    launch_tmuch "--save-layout e2e-test-layout e2e-pane-a"
+    sleep 2
+    send C-q
+    sleep 2
+    cleanup
+
+    # Verify layout was saved
+    assert_output_contains "$BINARY layouts" "e2e-test-layout" "layouts lists saved layout" && pass || fail
+
+    # Re-launch with the saved layout
+    tmux new-session -d -s e2e-pane-a "sleep 300"
+    sleep 1
+    launch_tmuch "--layout e2e-test-layout"
+    sleep 2
+    capture "test13-layout-loaded"
+    assert_screen_contains "e2e-pane-a" "layout restores pane" && pass || fail
+
+    send C-q
+    sleep 1
+    # Cleanup saved layout
+    rm -f "$HOME/.config/tmuch/layouts/e2e-test-layout.toml"
+    cleanup
+fi
+
+# ============================================================
+# TEST 14: tmuch layouts lists saved layout
+# ============================================================
+run_test "cli-layouts-list" "${1:-}"
+if true; then
+    mkdir -p "$HOME/.config/tmuch/layouts"
+    cat > "$HOME/.config/tmuch/layouts/e2e-list-test.toml" << 'TOML'
+name = "e2e-list-test"
+[[pane]]
+type = "local"
+session = "test"
+TOML
+    assert_output_contains "$BINARY layouts" "e2e-list-test" "layouts command lists layout" && pass || fail
+    rm -f "$HOME/.config/tmuch/layouts/e2e-list-test.toml"
+fi
+
+# ============================================================
+# TEST 15: http: prefix (start python3 http server)
+# ============================================================
+run_test "tui-http-source" "${1:-}"
+if true; then
+    # Create a simple file to serve
+    HTTP_DIR="/tmp/tmuch-e2e-http-$$"
+    mkdir -p "$HTTP_DIR"
+    echo "http-test-content-12345" > "$HTTP_DIR/index.html"
+
+    # Start a python3 HTTP server in background
+    python3 -m http.server 18923 --directory "$HTTP_DIR" &>/dev/null &
+    HTTP_PID=$!
+    sleep 1
+
+    launch_tmuch "-n 'http:http://localhost:18923/index.html:2000'"
+    sleep 4
+    capture "test15-http-source"
+    assert_screen_contains "[http]" "http: prefix shows [http] label" && pass || fail
+    assert_screen_contains "http-test-content-12345" "http source shows fetched content" && pass || fail
+
+    send C-q
+    sleep 1
+    kill $HTTP_PID 2>/dev/null || true
+    rm -rf "$HTTP_DIR"
+    cleanup
+fi
+
+# ============================================================
+# TEST 16: tmuch --version shows 0.2.0
+# ============================================================
+run_test "cli-version-check" "${1:-}"
+if true; then
+    assert_output_contains "$BINARY --version" "0.2.0" "version shows 0.2.0" && pass || fail
 fi
 
 # ============================================================

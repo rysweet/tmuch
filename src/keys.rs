@@ -24,6 +24,8 @@ pub enum Action {
     PickerCancel,
     RunBinding(String),
     SendKeys(String),
+    DiscoverAzlin,
+    PickerAddAll,
 }
 
 pub fn handle(event: KeyEvent, mode: &Mode, config: &Config) -> Option<Action> {
@@ -42,6 +44,7 @@ fn handle_normal(event: KeyEvent, config: &Config) -> Option<Action> {
             KeyCode::Char('a') => Some(Action::AddPane),
             KeyCode::Char('d') => Some(Action::DropPane),
             KeyCode::Char('s') => Some(Action::OpenSessionPicker),
+            KeyCode::Char('z') => Some(Action::DiscoverAzlin),
             _ => None,
         };
     }
@@ -78,6 +81,7 @@ fn handle_picker(event: KeyEvent) -> Option<Action> {
         KeyCode::Up | KeyCode::Char('k') => Some(Action::PickerUp),
         KeyCode::Down | KeyCode::Char('j') => Some(Action::PickerDown),
         KeyCode::Enter => Some(Action::PickerConfirm),
+        KeyCode::Char('a') => Some(Action::PickerAddAll),
         _ => None,
     }
 }

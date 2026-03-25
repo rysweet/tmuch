@@ -13,7 +13,8 @@ mod tmux;
 mod ui;
 mod update_check;
 
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
+use clap_complete::{generate, Shell};
 
 #[derive(Parser)]
 #[command(name = "tmuch", about = "TUI tmux multiplexer", version)]
@@ -50,6 +51,20 @@ enum Commands {
 
     /// List available saved layouts
     Layouts,
+
+    /// Generate shell completions
+    Completions {
+        /// Shell to generate completions for
+        #[arg(value_enum)]
+        shell: Shell,
+    },
+
+    /// Discover Azure VMs and their tmux sessions
+    Azlin {
+        /// Azure resource group to filter VMs
+        #[arg(short, long)]
+        resource_group: Option<String>,
+    },
 }
 
 fn main() -> anyhow::Result<()> {
@@ -69,6 +84,14 @@ fn main() -> anyhow::Result<()> {
             }
             return Ok(());
         }
+        Some(Commands::Completions { shell }) => {
+            let mut cmd = Cli::command();
+            generate(*shell, &mut cmd, "tmuch", &mut std::io::stdout());
+            return Ok(());
+        }
+        Some(Commands::Azlin { resource_group }) => {
+            return app::run_azlin(resource_group.clone());
+        }
         None => {}
     }
 
@@ -76,6 +99,9 @@ fn main() -> anyhow::Result<()> {
     update_check::check_for_updates();
 
     let mut config = config::load()?;
+
+    // Config validation warnings
+    config::validate_warnings(&config);
 
     // Apply CLI bind overrides
     for bind in &cli.binds {

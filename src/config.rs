@@ -78,3 +78,36 @@ pub fn load() -> Result<Config> {
         Ok(Config::default())
     }
 }
+
+/// Print warnings for common configuration issues.
+pub fn validate_warnings(config: &Config) {
+    // Warn if azlin enabled but az CLI not found
+    if config.azlin.enabled
+        && std::process::Command::new("az")
+            .arg("--version")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_err()
+    {
+        eprintln!("\x1b[33mWarning: azlin.enabled=true but `az` CLI not found in PATH.\x1b[0m");
+    }
+
+    // Warn if remote hosts configured but no SSH key found
+    if !config.remote.is_empty() {
+        let has_key = config.remote.iter().any(|r| r.key.is_some())
+            || dirs::home_dir()
+                .map(|h| {
+                    h.join(".ssh/azlin_key").exists()
+                        || h.join(".ssh/id_rsa").exists()
+                        || h.join(".ssh/id_ed25519").exists()
+                })
+                .unwrap_or(false);
+        if !has_key {
+            eprintln!(
+                "\x1b[33mWarning: remote hosts configured but no SSH key found \
+                 (~/.ssh/azlin_key, ~/.ssh/id_rsa, ~/.ssh/id_ed25519).\x1b[0m"
+            );
+        }
+    }
+}

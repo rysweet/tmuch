@@ -1,0 +1,99 @@
+name: "tmuch v0.2 Feature Smoke Test"
+description: |
+  Validates all v0.2 features: version bump, new subcommands,
+  programmable pane prefixes, shell completions.
+version: "1.0.0"
+
+config:
+  timeout: 60000
+  retries: 1
+  parallel: false
+
+agents:
+  - name: "cli-agent"
+    type: "system"
+    config:
+      shell: "bash"
+      cwd: "/home/azureuser/src/tmuch"
+      timeout: 15000
+      capture_output: true
+
+steps:
+  - name: "Version shows 0.2.0"
+    agent: "cli-agent"
+    action: "execute_command"
+    params:
+      command: "./target/release/tmuch --version"
+    expect:
+      exit_code: 0
+      stdout_contains: "tmuch 0.2.0"
+    timeout: 5000
+
+  - name: "Help shows azlin subcommand"
+    agent: "cli-agent"
+    action: "execute_command"
+    params:
+      command: "./target/release/tmuch --help"
+    expect:
+      exit_code: 0
+      stdout_contains:
+        - "azlin"
+        - "completions"
+        - "layouts"
+        - "update"
+    timeout: 5000
+
+  - name: "Completions subcommand works for bash"
+    agent: "cli-agent"
+    action: "execute_command"
+    params:
+      command: "./target/release/tmuch completions bash"
+    expect:
+      exit_code: 0
+      stdout_contains: "complete"
+    timeout: 5000
+
+  - name: "Completions subcommand works for zsh"
+    agent: "cli-agent"
+    action: "execute_command"
+    params:
+      command: "./target/release/tmuch completions zsh"
+    expect:
+      exit_code: 0
+    timeout: 5000
+
+  - name: "Layouts subcommand with no layouts"
+    agent: "cli-agent"
+    action: "execute_command"
+    params:
+      command: "./target/release/tmuch layouts"
+    expect:
+      exit_code: 0
+    timeout: 5000
+
+assertions:
+  - name: "Version is 0.2.0"
+    type: "command_success"
+    agent: "cli-agent"
+    params:
+      step: "Version shows 0.2.0"
+
+  - name: "Help is comprehensive"
+    type: "command_success"
+    agent: "cli-agent"
+    params:
+      step: "Help shows azlin subcommand"
+
+  - name: "Completions work"
+    type: "command_success"
+    agent: "cli-agent"
+    params:
+      step: "Completions subcommand works for bash"
+
+metadata:
+  tags:
+    - "cli"
+    - "smoke"
+    - "v0.2"
+  priority: "critical"
+  test_type: "smoke"

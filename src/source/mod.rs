@@ -1,4 +1,5 @@
 pub mod command;
+pub mod http;
 pub mod local_tmux;
 pub mod ssh_tmux;
 pub mod tail;
@@ -52,6 +53,16 @@ pub enum PaneSpec {
         remote_name: String,
         session: String,
     },
+    #[serde(rename = "http")]
+    Http {
+        url: String,
+        #[serde(default = "default_http_interval")]
+        interval_ms: u64,
+    },
+}
+
+fn default_http_interval() -> u64 {
+    5000
 }
 
 fn default_interval() -> u64 {
@@ -64,6 +75,22 @@ pub fn parse_new_arg(arg: &str) -> NewPaneRequest {
     if let Some(rest) = arg.strip_prefix("tail:") {
         NewPaneRequest::Tail {
             path: rest.to_string(),
+        }
+    } else if let Some(rest) = arg.strip_prefix("http:") {
+        // Format: http:url or http:url:interval_ms
+        let parts: Vec<&str> = rest.rsplitn(2, ':').collect();
+        if parts.len() == 2 {
+            if let Ok(interval) = parts[0].parse::<u64>() {
+                return NewPaneRequest::Http {
+                    url: parts[1].to_string(),
+                    interval_ms: interval,
+                };
+            }
+        }
+        // URL may contain colons (http://...), so treat entire rest as URL
+        NewPaneRequest::Http {
+            url: rest.to_string(),
+            interval_ms: 5000,
         }
     } else if let Some(rest) = arg.strip_prefix("watch:") {
         // Format: watch:command:interval_ms
@@ -91,4 +118,5 @@ pub enum NewPaneRequest {
     TmuxCommand { command: String },
     Command { command: String, interval_ms: u64 },
     Tail { path: String },
+    Http { url: String, interval_ms: u64 },
 }
