@@ -26,6 +26,7 @@ pub enum Action {
     SendKeys(String),
     DiscoverAzlin,
     PickerAddAll,
+    PickerScanAzlin,
 }
 
 pub fn handle(event: KeyEvent, mode: &Mode, config: &Config) -> Option<Action> {
@@ -83,6 +84,7 @@ fn handle_picker(event: KeyEvent) -> Option<Action> {
         KeyCode::Down | KeyCode::Char('j') => Some(Action::PickerDown),
         KeyCode::Enter => Some(Action::PickerConfirm),
         KeyCode::Char('a') => Some(Action::PickerAddAll),
+        KeyCode::Char('z') => Some(Action::PickerScanAzlin),
         _ => None,
     }
 }

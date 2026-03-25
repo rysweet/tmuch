@@ -253,6 +253,30 @@ impl App {
                 }
                 self.mode = Mode::SessionPicker;
             }
+            Action::PickerScanAzlin => {
+                // Scan azlin VMs and add their sessions to the picker
+                let rg = self.config.azlin.resource_group.as_deref();
+                let result =
+                    self.tokio_handle
+                        .block_on(crate::azlin_integration::discover_remote_sessions(
+                            &self.ssh_pool,
+                            rg,
+                        ));
+                if let Ok(remote_sessions) = result {
+                    // Add to existing picker sessions (avoid duplicates)
+                    for session in remote_sessions {
+                        let already_listed = self
+                            .picker
+                            .sessions
+                            .iter()
+                            .any(|s| s.name == session.name && s.host == session.host);
+                        if !already_listed {
+                            self.picker.sessions.push(session);
+                        }
+                    }
+                }
+                // Stay in picker mode
+            }
             Action::PickerAddAll => {
                 let sessions: Vec<_> = self.picker.sessions.clone();
                 for session in &sessions {
@@ -288,8 +312,22 @@ pub fn run_azlin(resource_group: Option<String>) -> Result<()> {
     let handle = rt.handle().clone();
     let ssh_pool = Arc::new(SshPool::default());
 
-    eprintln!("Discovering Azure VMs...");
-    let vms = crate::azlin_integration::discover_vms(resource_group.as_deref())?;
+    // Use CLI arg, then config, then azlin native config
+    let rg = resource_group.or(config.azlin.resource_group.clone());
+
+    if rg.is_none() {
+        eprintln!(
+            "\x1b[33mNo resource group specified. Use -r <RG> or set default_resource_group in ~/.azlin/config.toml\x1b[0m"
+        );
+    }
+
+    eprintln!(
+        "Discovering Azure VMs{}...",
+        rg.as_ref()
+            .map(|r| format!(" in {}", r))
+            .unwrap_or_default()
+    );
+    let vms = crate::azlin_integration::discover_vms(rg.as_deref())?;
 
     if vms.is_empty() {
         eprintln!("No running VMs found.");
@@ -301,34 +339,16 @@ pub fn run_azlin(resource_group: Option<String>) -> Result<()> {
         vms.len()
     );
 
-    let mut all_sessions = Vec::new();
-    for vm in &vms {
-        let remote = match crate::azlin_integration::vm_to_remote_config(vm) {
-            Ok(r) => r,
-            Err(e) => {
-                eprintln!("  Skipping {}: {}", vm.name, e);
-                continue;
-            }
-        };
-        let result = handle.block_on(crate::source::ssh_tmux::list_remote_sessions(
-            &ssh_pool, &remote,
-        ));
-        match result {
-            Ok(sessions) => {
-                for sess in sessions {
-                    eprintln!("  {}:{}", vm.name, sess);
-                    all_sessions.push((remote.clone(), sess));
-                }
-            }
-            Err(e) => {
-                eprintln!("  {}: SSH error: {}", vm.name, e);
-            }
-        }
-    }
+    // Discover sessions using SSH subprocess (works with all auth methods)
+    let discovered = crate::azlin_integration::discover_remote_sessions_sync(rg.as_deref())?;
 
-    if all_sessions.is_empty() {
+    if discovered.is_empty() {
         eprintln!("No tmux sessions found on any VM.");
         return Ok(());
+    }
+
+    for s in &discovered {
+        eprintln!("  {}:{}", s.host.as_deref().unwrap_or("?"), s.name);
     }
 
     // Launch TUI with all discovered sessions
@@ -340,14 +360,23 @@ pub fn run_azlin(resource_group: Option<String>) -> Result<()> {
     let mut app = App::new(config, handle);
     app.ssh_pool = ssh_pool;
 
-    for (remote, session) in &all_sessions {
-        let source = SshTmuxSource::new(
-            remote.clone(),
-            session.clone(),
-            Arc::clone(&app.ssh_pool),
-            &app.tokio_handle,
-        );
-        app.pane_manager.add(Box::new(source));
+    // Create SshSubprocessSource panes (uses system ssh, not russh)
+    for session_info in &discovered {
+        let vm_name = session_info.host.as_deref().unwrap_or("unknown");
+        let vm = vms.iter().find(|v| v.name == vm_name);
+        if let Some(vm) = vm {
+            if let Ok(remote) = crate::azlin_integration::vm_to_remote_config(vm) {
+                let source = crate::source::ssh_subprocess::SshSubprocessSource::new(
+                    remote.name,
+                    remote.host,
+                    remote.user,
+                    remote.port,
+                    session_info.name.clone(),
+                    remote.poll_interval_ms,
+                );
+                app.pane_manager.add(Box::new(source));
+            }
+        }
     }
 
     let poll_duration = Duration::from_millis(app.config.display.poll_interval_ms);
