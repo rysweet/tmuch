@@ -13,24 +13,28 @@ pub fn compute(n: usize, area: Rect) -> Vec<Rect> {
     let cols = (n as f64).sqrt().ceil() as u16;
     let rows = ((n as f64) / (cols as f64)).ceil() as u16;
 
-    let col_width = area.width / cols;
     let row_height = area.height / rows;
 
     let mut rects = Vec::with_capacity(n);
     let mut idx = 0;
 
     for row in 0..rows {
-        for col in 0..cols {
-            if idx >= n {
-                break;
-            }
-            // Last column/row gets remaining pixels
-            let x = area.x + col * col_width;
+        let remaining = n - idx;
+        let row_cols = if remaining < cols as usize {
+            remaining as u16
+        } else {
+            cols
+        };
+        let row_col_width = area.width / row_cols;
+
+        for col in 0..row_cols {
+            // Last column/row gets remaining pixels to avoid rounding gaps
+            let x = area.x + col * row_col_width;
             let y = area.y + row * row_height;
-            let w = if col == cols - 1 {
-                area.width - col * col_width
+            let w = if col == row_cols - 1 {
+                area.width - col * row_col_width
             } else {
-                col_width
+                row_col_width
             };
             let h = if row == rows - 1 {
                 area.height - row * row_height
@@ -76,6 +80,17 @@ mod tests {
         let rects = compute(4, Rect::new(0, 0, 80, 24));
         assert_eq!(rects.len(), 4);
         // 4 panes -> 2x2 grid
+    }
+
+    #[test]
+    fn test_three_panes_last_row_spans_full_width() {
+        let rects = compute(3, Rect::new(0, 0, 80, 24));
+        assert_eq!(rects.len(), 3);
+        // 3 panes -> 2x2 grid, last row has 1 pane spanning full width
+        assert_eq!(rects[0].width, 40);
+        assert_eq!(rects[1].width, 40);
+        assert_eq!(rects[2].width, 80);
+        assert_eq!(rects[2].x, 0);
     }
 
     #[test]
