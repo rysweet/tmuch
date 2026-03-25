@@ -1,4 +1,5 @@
 mod app;
+mod azlin_integration;
 mod config;
 mod consts;
 mod keys;

@@ -1,3 +1,4 @@
+use crate::azlin_integration::AzlinConfig;
 use crate::source::ssh_tmux::RemoteConfig;
 use anyhow::Result;
 use serde::Deserialize;
@@ -12,6 +13,8 @@ pub struct Config {
     pub display: DisplayConfig,
     #[serde(default)]
     pub remote: Vec<RemoteConfig>,
+    #[serde(default)]
+    pub azlin: AzlinConfig,
 }
 
 #[derive(Debug, Deserialize)]
