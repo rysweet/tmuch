@@ -1,3 +1,4 @@
+use crate::source::ssh_tmux::RemoteConfig;
 use anyhow::Result;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -9,6 +10,8 @@ pub struct Config {
     pub keys: KeyConfig,
     pub bindings: HashMap<char, String>,
     pub display: DisplayConfig,
+    #[serde(default)]
+    pub remote: Vec<RemoteConfig>,
 }
 
 #[derive(Debug, Deserialize)]

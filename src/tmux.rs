@@ -5,8 +5,10 @@ use std::process::Command;
 pub struct SessionInfo {
     pub name: String,
     pub attached: bool,
-    #[allow(dead_code)] // displayed in session picker
+    #[allow(dead_code)]
     pub windows: u32,
+    /// None for local sessions, Some("hostname") for remote
+    pub host: Option<String>,
 }
 
 fn run_tmux(args: &[&str]) -> Result<String> {
@@ -39,6 +41,7 @@ pub fn list_sessions() -> Result<Vec<SessionInfo>> {
                 name: parts[0].to_string(),
                 attached: parts[1] != "0",
                 windows: parts[2].parse().unwrap_or(1),
+                host: None,
             });
         }
     }

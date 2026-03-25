@@ -126,12 +126,18 @@ fn draw_session_picker(frame: &mut Frame, app: &App, area: Rect) {
                 "  "
             };
             let attached = if s.attached { " (attached)" } else { "" };
+            let host_label = match &s.host {
+                Some(h) => format!(" [{}]", h),
+                None => String::new(),
+            };
             let style = if i == app.picker.selected {
                 Style::default().fg(Color::Yellow)
+            } else if s.host.is_some() {
+                Style::default().fg(Color::Cyan)
             } else {
                 Style::default().fg(Color::White)
             };
-            ListItem::new(format!("{}{}{}", prefix, s.name, attached)).style(style)
+            ListItem::new(format!("{}{}{}{}", prefix, s.name, host_label, attached)).style(style)
         })
         .collect();
 

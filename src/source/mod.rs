@@ -1,5 +1,6 @@
 pub mod command;
 pub mod local_tmux;
+pub mod ssh_tmux;
 pub mod tail;
 
 use anyhow::Result;
@@ -46,6 +47,11 @@ pub enum PaneSpec {
     },
     #[serde(rename = "tail")]
     Tail { path: String },
+    #[serde(rename = "remote")]
+    Remote {
+        remote_name: String,
+        session: String,
+    },
 }
 
 fn default_interval() -> u64 {
