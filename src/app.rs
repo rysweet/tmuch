@@ -174,11 +174,12 @@ impl App {
                 self.mode = Mode::Normal;
             }
             Action::OpenSessionPicker => {
-                if self.config.remote.is_empty() {
+                if self.config.remote.is_empty() && !self.config.azlin.enabled {
                     self.picker.refresh()?;
                 } else {
                     self.picker.refresh_with_remotes(
                         &self.config.remote,
+                        &self.config.azlin,
                         &self.ssh_pool,
                         &self.tokio_handle,
                     )?;
