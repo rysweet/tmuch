@@ -1,0 +1,32 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "tmuch"
+version = "0.2.0"
+description = "TUI tmux multiplexer - display multiple tmux sessions in a single terminal"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.8"
+authors = [{ name = "Ryan Sweet" }]
+keywords = ["tmux", "terminal", "multiplexer", "tui", "ratatui"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Topic :: System :: Shells",
+    "Topic :: Terminals :: Terminal Emulators/X Terminals",
+]
+
+[project.urls]
+Homepage = "https://github.com/rysweet/tmuch"
+Repository = "https://github.com/rysweet/tmuch"
+
+[project.scripts]
+tmuch = "tmuch:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["python/tmuch"]
