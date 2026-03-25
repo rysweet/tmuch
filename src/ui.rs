@@ -44,11 +44,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
             let inner = block.inner(rect);
 
             // Parse ANSI content
-            let text = pane
-                .content
-                .as_bytes()
-                .into_text()
-                .unwrap_or_default();
+            let text = pane.content.as_bytes().into_text().unwrap_or_default();
 
             let paragraph = Paragraph::new(text).block(block);
             frame.render_widget(paragraph, rect);
@@ -73,7 +69,12 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     };
 
     let pane_info = if let Some(pane) = app.pane_manager.focused() {
-        format!("[{}/{}] {}", app.pane_manager.focused_index() + 1, app.pane_manager.count(), pane.session_name)
+        format!(
+            "[{}/{}] {}",
+            app.pane_manager.focused_index() + 1,
+            app.pane_manager.count(),
+            pane.session_name
+        )
     } else {
         format!("[0/{}]", app.pane_manager.count())
     };
@@ -116,7 +117,11 @@ fn draw_session_picker(frame: &mut Frame, app: &App, area: Rect) {
         .iter()
         .enumerate()
         .map(|(i, s)| {
-            let prefix = if i == app.picker.selected { "▶ " } else { "  " };
+            let prefix = if i == app.picker.selected {
+                "▶ "
+            } else {
+                "  "
+            };
             let attached = if s.attached { " (attached)" } else { "" };
             let style = if i == app.picker.selected {
                 Style::default().fg(Color::Yellow)

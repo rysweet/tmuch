@@ -52,11 +52,10 @@ fn handle_normal(event: KeyEvent, config: &Config) -> Option<Action> {
         KeyCode::Enter => Some(Action::EnterPaneMode),
         KeyCode::Char(c) => {
             // Check command bindings
-            if let Some(cmd) = config.bindings.get(&c) {
-                Some(Action::RunBinding(cmd.clone()))
-            } else {
-                None
-            }
+            config
+                .bindings
+                .get(&c)
+                .map(|cmd| Action::RunBinding(cmd.clone()))
         }
         _ => None,
     }

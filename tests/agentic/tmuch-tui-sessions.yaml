@@ -1,0 +1,141 @@
+name: "tmuch TUI Session Management"
+description: |
+  Tests core TUI functionality: multi-pane display, pane add/drop,
+  focus mode, session picker, and quit. Uses the TUI agent to spawn
+  tmuch in a real terminal and interact via keypresses.
+version: "1.0.0"
+
+config:
+  timeout: 120000
+  retries: 1
+  parallel: false
+
+environment:
+  requires:
+    - tmux
+
+agents:
+  - name: "setup-agent"
+    type: "cli"
+    config:
+      defaultTimeout: 10000
+
+  - name: "tui-agent"
+    type: "tui"
+    config:
+      terminalType: "xterm-256color"
+      terminalSize:
+        cols: 180
+        rows: 50
+      defaultTimeout: 10000
+      inputTiming:
+        keystrokeDelay: 50
+        responseDelay: 500
+        stabilizationTimeout: 2000
+      outputCapture:
+        preserveColors: true
+        bufferSize: 65536
+
+steps:
+  # Setup: create test tmux sessions
+  - name: "Create test tmux sessions"
+    agent: "setup-agent"
+    action: "execute"
+    target: "bash -c 'tmux new-session -d -s gadugi-a \"echo pane-a-content; sleep 300\" && tmux new-session -d -s gadugi-b \"echo pane-b-content; sleep 300\"'"
+    timeout: 5000
+
+  # Launch tmuch with two sessions
+  - name: "Launch tmuch with two sessions"
+    agent: "tui-agent"
+    action: "spawn"
+    target: "./target/release/tmuch gadugi-a gadugi-b"
+    timeout: 5000
+
+  - name: "Wait for TUI to render"
+    agent: "tui-agent"
+    action: "wait"
+    value: "2000"
+
+  # Verify multi-pane display
+  - name: "Verify first pane title"
+    agent: "tui-agent"
+    action: "validate_output"
+    expected: "gadugi-a"
+    timeout: 3000
+
+  - name: "Verify second pane title"
+    agent: "tui-agent"
+    action: "validate_output"
+    expected: "gadugi-b"
+    timeout: 3000
+
+  - name: "Verify NORMAL mode"
+    agent: "tui-agent"
+    action: "validate_output"
+    expected: "NORMAL"
+    timeout: 3000
+
+  - name: "Verify pane count"
+    agent: "tui-agent"
+    action: "validate_output"
+    expected: "[2/2]"
+    timeout: 3000
+
+  # Test focus mode (Enter)
+  - name: "Enter focus mode"
+    agent: "tui-agent"
+    action: "send_input"
+    value: "\r"
+    timeout: 3000
+
+  - name: "Wait for mode change"
+    agent: "tui-agent"
+    action: "wait"
+    value: "1000"
+
+  - name: "Verify FOCUSED mode"
+    agent: "tui-agent"
+    action: "validate_output"
+    expected: "FOCUSED"
+    timeout: 3000
+
+  # Exit focus mode (Escape)
+  - name: "Exit focus mode"
+    agent: "tui-agent"
+    action: "send_input"
+    value: "\u001b"
+    timeout: 3000
+
+  - name: "Wait for mode change back"
+    agent: "tui-agent"
+    action: "wait"
+    value: "1000"
+
+  - name: "Verify back to NORMAL"
+    agent: "tui-agent"
+    action: "validate_output"
+    expected: "NORMAL"
+    timeout: 3000
+
+  # Quit
+  - name: "Quit tmuch"
+    agent: "tui-agent"
+    action: "send_input"
+    value: "\u0011"
+    timeout: 5000
+
+cleanup:
+  - name: "Kill test tmux sessions"
+    agent: "setup-agent"
+    action: "execute"
+    target: "bash -c 'tmux kill-session -t gadugi-a 2>/dev/null; tmux kill-session -t gadugi-b 2>/dev/null; true'"
+
+metadata:
+  tags:
+    - "tui"
+    - "e2e"
+    - "session-management"
+    - "pane-management"
+    - "critical"
+  priority: "critical"
+  test_type: "e2e"

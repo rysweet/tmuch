@@ -3,7 +3,7 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 pub struct Config {
     pub keys: KeyConfig,
@@ -29,16 +29,6 @@ pub struct KeyConfig {
 pub struct DisplayConfig {
     pub poll_interval_ms: u64,
     pub border_style: String,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            keys: KeyConfig::default(),
-            bindings: HashMap::new(),
-            display: DisplayConfig::default(),
-        }
-    }
 }
 
 impl Default for KeyConfig {

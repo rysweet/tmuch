@@ -1,17 +1,23 @@
 mod app;
 mod config;
+mod consts;
 mod keys;
 mod layout;
 mod pane;
+mod self_update;
 mod session_picker;
 mod tmux;
 mod ui;
+mod update_check;
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
 #[command(name = "tmuch", about = "TUI tmux multiplexer", version)]
 struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
+
     /// tmux sessions to attach on startup
     #[arg()]
     sessions: Vec<String>,
@@ -25,8 +31,24 @@ struct Cli {
     binds: Vec<String>,
 }
 
+#[derive(Subcommand)]
+enum Commands {
+    /// Update tmuch to the latest version from GitHub Releases
+    #[command(alias = "self-update")]
+    Update,
+}
+
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
+
+    // Handle subcommands
+    if let Some(Commands::Update) = cli.command {
+        return self_update::handle_self_update();
+    }
+
+    // Non-blocking update check (background, cached)
+    update_check::check_for_updates();
+
     let mut config = config::load()?;
 
     // Apply CLI bind overrides

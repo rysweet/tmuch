@@ -5,6 +5,7 @@ use std::process::Command;
 pub struct SessionInfo {
     pub name: String,
     pub attached: bool,
+    #[allow(dead_code)] // displayed in session picker
     pub windows: u32,
 }
 
@@ -22,7 +23,11 @@ fn run_tmux(args: &[&str]) -> Result<String> {
 }
 
 pub fn list_sessions() -> Result<Vec<SessionInfo>> {
-    let output = match run_tmux(&["list-sessions", "-F", "#{session_name}\t#{session_attached}\t#{session_windows}"]) {
+    let output = match run_tmux(&[
+        "list-sessions",
+        "-F",
+        "#{session_name}\t#{session_attached}\t#{session_windows}",
+    ]) {
         Ok(o) => o,
         Err(_) => return Ok(Vec::new()), // no server running
     };
