@@ -29,3 +29,10 @@ Thumbs.db
 *.profdata
 lcov.info
 tarpaulin-report.html
+
+# Test/runtime artifacts
+tests/evidence/
+logs/
+outputs/
+.claude/runtime/
+.claude/settings.json

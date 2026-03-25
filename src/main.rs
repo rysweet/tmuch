@@ -3,9 +3,11 @@ mod config;
 mod consts;
 mod keys;
 mod layout;
+mod layouts;
 mod pane;
 mod self_update;
 mod session_picker;
+mod source;
 mod tmux;
 mod ui;
 mod update_check;
@@ -22,13 +24,21 @@ struct Cli {
     #[arg()]
     sessions: Vec<String>,
 
-    /// Create a new tmux session running this command
+    /// Create a new pane (prefix: watch:cmd:ms, tail:path, or plain tmux command)
     #[arg(short = 'n', long = "new", value_name = "COMMAND")]
     new_commands: Vec<String>,
 
     /// Override a command binding (e.g., --bind 1="top")
     #[arg(short = 'b', long = "bind", value_name = "KEY=CMD")]
     binds: Vec<String>,
+
+    /// Load a named layout
+    #[arg(short = 'l', long = "layout", value_name = "NAME")]
+    layout: Option<String>,
+
+    /// Save current layout on exit
+    #[arg(long = "save-layout", value_name = "NAME")]
+    save_layout: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -36,14 +46,29 @@ enum Commands {
     /// Update tmuch to the latest version from GitHub Releases
     #[command(alias = "self-update")]
     Update,
+
+    /// List available saved layouts
+    Layouts,
 }
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     // Handle subcommands
-    if let Some(Commands::Update) = cli.command {
-        return self_update::handle_self_update();
+    match &cli.command {
+        Some(Commands::Update) => return self_update::handle_self_update(),
+        Some(Commands::Layouts) => {
+            let names = layouts::list();
+            if names.is_empty() {
+                eprintln!("No saved layouts. Use --save-layout NAME to save one.");
+            } else {
+                for name in names {
+                    println!("{}", name);
+                }
+            }
+            return Ok(());
+        }
+        None => {}
     }
 
     // Non-blocking update check (background, cached)
@@ -60,5 +85,11 @@ fn main() -> anyhow::Result<()> {
         }
     }
 
-    app::run(config, cli.sessions, cli.new_commands)
+    app::run(
+        config,
+        cli.sessions,
+        cli.new_commands,
+        cli.layout,
+        cli.save_layout,
+    )
 }

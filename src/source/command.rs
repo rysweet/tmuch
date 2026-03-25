@@ -1,0 +1,93 @@
+use super::{ContentSource, PaneSpec};
+use anyhow::Result;
+use std::time::{Duration, Instant};
+
+/// Runs a command periodically and displays its output.
+pub struct CommandSource {
+    command: String,
+    interval: Duration,
+    last_run: Option<Instant>,
+    latest_output: String,
+    display_name: String,
+}
+
+impl CommandSource {
+    pub fn new(command: String, interval_ms: u64) -> Self {
+        // Derive a short display name from the command
+        let display_name = command
+            .split_whitespace()
+            .next()
+            .unwrap_or(&command)
+            .rsplit('/')
+            .next()
+            .unwrap_or(&command)
+            .to_string();
+
+        Self {
+            command,
+            interval: Duration::from_millis(interval_ms),
+            last_run: None,
+            latest_output: String::new(),
+            display_name,
+        }
+    }
+
+    fn should_refresh(&self) -> bool {
+        match self.last_run {
+            None => true,
+            Some(t) => t.elapsed() >= self.interval,
+        }
+    }
+
+    fn refresh(&mut self) {
+        let result = std::process::Command::new("sh")
+            .args(["-c", &self.command])
+            .output();
+
+        match result {
+            Ok(output) => {
+                self.latest_output = String::from_utf8_lossy(&output.stdout).to_string();
+                if !output.stderr.is_empty() {
+                    self.latest_output
+                        .push_str(&String::from_utf8_lossy(&output.stderr));
+                }
+            }
+            Err(e) => {
+                self.latest_output = format!("Error: {}", e);
+            }
+        }
+        self.last_run = Some(Instant::now());
+    }
+}
+
+impl ContentSource for CommandSource {
+    fn capture(&mut self, _width: u16, _height: u16) -> Result<String> {
+        if self.should_refresh() {
+            self.refresh();
+        }
+        Ok(self.latest_output.clone())
+    }
+
+    fn send_keys(&mut self, _keys: &str) -> Result<()> {
+        Ok(()) // not interactive
+    }
+
+    fn name(&self) -> &str {
+        &self.display_name
+    }
+
+    fn source_label(&self) -> &str {
+        "cmd"
+    }
+
+    fn is_interactive(&self) -> bool {
+        false
+    }
+
+    fn to_spec(&self) -> PaneSpec {
+        PaneSpec::Command {
+            command: self.command.clone(),
+            interval_ms: self.interval.as_millis() as u64,
+        }
+    }
+}

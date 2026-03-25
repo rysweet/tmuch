@@ -1,8 +1,35 @@
+use crate::source::ContentSource;
+
 pub struct Pane {
-    pub session_name: String,
+    pub source: Box<dyn ContentSource>,
     pub content: String,
-    /// If true, we created this session and should kill it on drop
-    pub owned: bool,
+}
+
+impl Pane {
+    pub fn new(source: Box<dyn ContentSource>) -> Self {
+        Self {
+            source,
+            content: String::new(),
+        }
+    }
+
+    pub fn name(&self) -> &str {
+        self.source.name()
+    }
+
+    pub fn source_label(&self) -> &str {
+        self.source.source_label()
+    }
+
+    pub fn is_interactive(&self) -> bool {
+        self.source.is_interactive()
+    }
+}
+
+impl Drop for Pane {
+    fn drop(&mut self) {
+        self.source.cleanup();
+    }
 }
 
 pub struct PaneManager {
@@ -18,13 +45,8 @@ impl PaneManager {
         }
     }
 
-    pub fn add(&mut self, session_name: String, owned: bool) {
-        self.panes.push(Pane {
-            session_name,
-            content: String::new(),
-            owned,
-        });
-        // Focus the newly added pane
+    pub fn add(&mut self, source: Box<dyn ContentSource>) {
+        self.panes.push(Pane::new(source));
         self.focused = self.panes.len() - 1;
     }
 
@@ -41,6 +63,10 @@ impl PaneManager {
 
     pub fn focused(&self) -> Option<&Pane> {
         self.panes.get(self.focused)
+    }
+
+    pub fn focused_mut(&mut self) -> Option<&mut Pane> {
+        self.panes.get_mut(self.focused)
     }
 
     pub fn focused_index(&self) -> usize {
