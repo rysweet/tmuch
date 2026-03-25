@@ -1,0 +1,80 @@
+name: "tmuch CLI Smoke Test"
+description: |
+  Basic validation that tmuch CLI starts, shows help, version,
+  and the update subcommand works gracefully.
+version: "1.0.0"
+
+config:
+  timeout: 60000
+  retries: 1
+  parallel: false
+
+agents:
+  - name: "cli-agent"
+    type: "system"
+    config:
+      shell: "bash"
+      cwd: "/home/azureuser/src/tmuch"
+      timeout: 15000
+      capture_output: true
+
+steps:
+  - name: "Help flag shows usage"
+    agent: "cli-agent"
+    action: "execute_command"
+    params:
+      command: "./target/release/tmuch --help"
+    expect:
+      exit_code: 0
+      stdout_contains:
+        - "TUI tmux multiplexer"
+        - "update"
+        - "SESSIONS"
+    timeout: 5000
+
+  - name: "Version flag shows version"
+    agent: "cli-agent"
+    action: "execute_command"
+    params:
+      command: "./target/release/tmuch --version"
+    expect:
+      exit_code: 0
+      stdout_contains: "tmuch 0.1.0"
+    timeout: 5000
+
+  - name: "Update subcommand help"
+    agent: "cli-agent"
+    action: "execute_command"
+    params:
+      command: "./target/release/tmuch update --help"
+    expect:
+      exit_code: 0
+      stdout_contains: "Update tmuch to the latest version"
+    timeout: 5000
+
+assertions:
+  - name: "Help command works"
+    type: "command_success"
+    agent: "cli-agent"
+    params:
+      step: "Help flag shows usage"
+
+  - name: "Version command works"
+    type: "command_success"
+    agent: "cli-agent"
+    params:
+      step: "Version flag shows version"
+
+  - name: "Update help works"
+    type: "command_success"
+    agent: "cli-agent"
+    params:
+      step: "Update subcommand help"
+
+metadata:
+  tags:
+    - "cli"
+    - "smoke"
+    - "critical"
+  priority: "critical"
+  test_type: "smoke"
