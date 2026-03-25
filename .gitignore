@@ -4,7 +4,7 @@
 *.pdb
 
 # Cargo
-Cargo.lock is included for binaries
+# Cargo.lock is included for binaries
 # !Cargo.lock
 
 # IDE

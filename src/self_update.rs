@@ -14,8 +14,6 @@ fn platform_suffix() -> Option<&'static str> {
         Some("macos-x86_64")
     } else if cfg!(target_os = "macos") && cfg!(target_arch = "aarch64") {
         Some("macos-aarch64")
-    } else if cfg!(target_os = "windows") {
-        Some("windows-x86_64")
     } else {
         None
     }
@@ -30,7 +28,7 @@ fn validate_download_url(url: &str) -> Result<()> {
     }
     anyhow::bail!(
         "Download URL does not match allowed hosts: {}",
-        &url[..url.len().min(80)]
+        url.get(..80).unwrap_or(url)
     );
 }
 
@@ -160,7 +158,7 @@ fn download_and_replace(url: &str, version: &str) -> Result<()> {
     }
 
     // Atomic replacement: write new binary to temp file in exe_dir, then rename over current
-    let staging_path = exe_dir.join(".tmuch-update-staging");
+    let staging_path = exe_dir.join(format!(".tmuch-update-staging-{}", std::process::id()));
     fs::copy(&new_bin, &staging_path).context("Failed to stage new binary")?;
     #[cfg(unix)]
     {
