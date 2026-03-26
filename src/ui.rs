@@ -3,9 +3,9 @@ use crate::keys::Mode;
 use crate::layout;
 use ansi_to_tui::IntoText;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph};
+use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragraph};
 use ratatui::Frame;
 
 pub fn draw(frame: &mut Frame, app: &App) {
@@ -32,27 +32,49 @@ pub fn draw(frame: &mut Frame, app: &App) {
     for (i, pane) in app.pane_manager.panes().iter().enumerate() {
         if let Some(&rect) = rects.get(i) {
             let is_focused = i == app.pane_manager.focused_index();
+            let is_remote = pane.source_label() != "local";
+
             let border_color = if is_focused {
                 match app.mode {
                     Mode::PaneFocused => Color::Green,
                     _ => Color::Yellow,
                 }
+            } else if is_remote {
+                Color::Rgb(40, 60, 80)
             } else {
-                Color::DarkGray
+                Color::Rgb(60, 60, 60)
             };
 
             let label = pane.source_label();
-            let title = if is_focused && app.mode == Mode::PaneFocused {
-                format!(" {} [ATTACHED] ", pane.name())
-            } else if label != "local" {
-                format!(" {} [{}] ", pane.name(), label)
+            let title_spans = if is_focused && app.mode == Mode::PaneFocused {
+                vec![Span::styled(
+                    format!(" \u{25b6} {} [ATTACHED] ", pane.name()),
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD),
+                )]
             } else {
-                format!(" {} ", pane.name())
+                let name_style = if is_focused {
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::Rgb(120, 120, 120))
+                };
+                if label != "local" {
+                    vec![Span::styled(
+                        format!(" {} [{}] ", pane.name(), label),
+                        name_style,
+                    )]
+                } else {
+                    vec![Span::styled(format!(" {} ", pane.name()), name_style)]
+                }
             };
 
             let block = Block::default()
-                .title(title)
+                .title(Line::from(title_spans))
                 .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
                 .border_style(Style::default().fg(border_color));
 
             let inner = block.inner(rect);
@@ -80,22 +102,95 @@ pub fn draw(frame: &mut Frame, app: &App) {
     }
 }
 
+fn hint_separator() -> Span<'static> {
+    Span::styled(" \u{2502} ", Style::default().fg(Color::Rgb(60, 60, 60)))
+}
+
+fn hint_key(key: &'static str) -> Span<'static> {
+    Span::styled(
+        key,
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
+    )
+}
+
+fn hint_label(label: &'static str) -> Span<'static> {
+    Span::styled(label, Style::default().fg(Color::DarkGray))
+}
+
 fn draw_hints_bar(frame: &mut Frame, app: &App, area: Rect) {
-    let hints = match app.mode {
-        Mode::Normal => {
-            " q Quit \u{2502} ^A Add \u{2502} ^D Drop \u{2502} ^S Sessions \u{2502} ^Z Azlin \u{2502} ^E Edit Cmds \u{2502} Tab Next \u{2502} Enter Focus \u{2502} 1-9 Bindings"
-        }
-        Mode::PaneFocused => " Esc Unfocus \u{2502} All keys forwarded to session",
-        Mode::SessionPicker => {
-            " \u{2191}\u{2193}/jk Navigate \u{2502} Enter Select \u{2502} a Add All \u{2502} z Scan Azlin \u{2502} Esc Cancel"
-        }
-        Mode::CommandEditor => {
-            " \u{2191}\u{2193} Navigate \u{2502} d Delete \u{2502} Esc Close \u{2502} Edit ~/.config/tmuch/config.toml to add bindings"
-        }
+    let spans = match app.mode {
+        Mode::Normal => vec![
+            Span::raw(" "),
+            hint_key("q"),
+            hint_label(" Quit"),
+            hint_separator(),
+            hint_key("^A"),
+            hint_label(" Add"),
+            hint_separator(),
+            hint_key("^D"),
+            hint_label(" Drop"),
+            hint_separator(),
+            hint_key("^S"),
+            hint_label(" Sessions"),
+            hint_separator(),
+            hint_key("^Z"),
+            hint_label(" Azlin"),
+            hint_separator(),
+            hint_key("^E"),
+            hint_label(" Edit Cmds"),
+            hint_separator(),
+            hint_key("Tab"),
+            hint_label(" Next"),
+            hint_separator(),
+            hint_key("Enter"),
+            hint_label(" Focus"),
+            hint_separator(),
+            hint_key("1-9"),
+            hint_label(" Bindings"),
+        ],
+        Mode::PaneFocused => vec![
+            Span::raw(" "),
+            hint_key("Esc"),
+            hint_label(" Unfocus"),
+            hint_separator(),
+            hint_label("All keys forwarded to session"),
+        ],
+        Mode::SessionPicker => vec![
+            Span::raw(" "),
+            hint_key("\u{2191}\u{2193}/jk"),
+            hint_label(" Navigate"),
+            hint_separator(),
+            hint_key("Enter"),
+            hint_label(" Select"),
+            hint_separator(),
+            hint_key("a"),
+            hint_label(" Add All"),
+            hint_separator(),
+            hint_key("z"),
+            hint_label(" Scan Azlin"),
+            hint_separator(),
+            hint_key("Esc"),
+            hint_label(" Cancel"),
+        ],
+        Mode::CommandEditor => vec![
+            Span::raw(" "),
+            hint_key("\u{2191}\u{2193}"),
+            hint_label(" Navigate"),
+            hint_separator(),
+            hint_key("d"),
+            hint_label(" Delete"),
+            hint_separator(),
+            hint_key("Esc"),
+            hint_label(" Close"),
+            hint_separator(),
+            hint_label("Edit ~/.config/tmuch/config.toml to add bindings"),
+        ],
     };
 
-    let line = Line::from(Span::styled(hints, Style::default().fg(Color::DarkGray)));
-    let bar = Paragraph::new(line).style(Style::default());
+    let line = Line::from(spans);
+    let bar = Paragraph::new(line).style(Style::default().bg(Color::Rgb(30, 30, 30)));
     frame.render_widget(bar, area);
 }
 
@@ -118,15 +213,35 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         format!("[0/{}]", app.pane_manager.count())
     };
 
-    let line = Line::from(vec![
+    let version_tag = concat!("tmuch v", env!("CARGO_PKG_VERSION"), " ");
+    let version_len = version_tag.len() as u16;
+
+    // Left side spans
+    let left_spans = vec![
         Span::styled(
             format!(" {} ", mode_str),
             Style::default().fg(Color::Black).bg(Color::Cyan),
         ),
         Span::raw(" "),
-        Span::styled(pane_info, Style::default().fg(Color::White)),
-    ]);
+        Span::styled(pane_info.clone(), Style::default().fg(Color::White)),
+    ];
 
+    // Compute padding for right-alignment
+    let left_len = (mode_str.len() + 2) + 1 + pane_info.len();
+    let padding = if area.width as usize > left_len + version_len as usize {
+        area.width as usize - left_len - version_len as usize
+    } else {
+        1
+    };
+
+    let mut spans = left_spans;
+    spans.push(Span::raw(" ".repeat(padding)));
+    spans.push(Span::styled(
+        version_tag,
+        Style::default().fg(Color::DarkGray),
+    ));
+
+    let line = Line::from(spans);
     let bar = Paragraph::new(line).style(Style::default().bg(Color::Black));
     frame.render_widget(bar, area);
 }
@@ -158,7 +273,9 @@ fn draw_session_picker(frame: &mut Frame, app: &App, area: Rect) {
                 None => String::new(),
             };
             let style = if i == app.picker.selected {
-                Style::default().fg(Color::Yellow)
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
             } else if s.host.is_some() {
                 Style::default().fg(Color::Cyan)
             } else {
@@ -170,8 +287,9 @@ fn draw_session_picker(frame: &mut Frame, app: &App, area: Rect) {
 
     let list = List::new(items).block(
         Block::default()
-            .title(" tmux sessions ")
+            .title(Span::styled(" Sessions ", Style::default().fg(Color::Cyan)))
             .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(Color::Cyan)),
     );
 
@@ -207,7 +325,9 @@ fn draw_command_editor(frame: &mut Frame, app: &App, area: Rect) {
                 "  "
             };
             let style = if i == editor.selected {
-                Style::default().fg(Color::Yellow)
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::White)
             };
@@ -221,8 +341,12 @@ fn draw_command_editor(frame: &mut Frame, app: &App, area: Rect) {
 
     let list = List::new(items).block(
         Block::default()
-            .title(" Command Bindings ")
+            .title(Span::styled(
+                " Command Bindings ",
+                Style::default().fg(Color::Cyan),
+            ))
             .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(Color::Cyan)),
     );
 

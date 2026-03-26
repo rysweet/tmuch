@@ -29,7 +29,7 @@ cargo build --release 2>&1 | tail -1
 # Cleanup any leftover test sessions
 cleanup() {
     tmux kill-session -t "$TEST_SESSION" 2>/dev/null || true
-    for s in $(tmux list-sessions -F '#{session_name}' 2>/dev/null | grep '^e2e-'); do
+    for s in $(tmux list-sessions -F '#{session_name}' 2>/dev/null | grep '^e2e-pane-'); do
         tmux kill-session -t "$s" 2>/dev/null || true
     done
     for s in $(tmux list-sessions -F '#{session_name}' 2>/dev/null | grep '^tmuch-'); do
@@ -215,7 +215,7 @@ if true; then
     send C-s  # Open picker
     sleep 1
     capture "test5-picker-open"
-    assert_screen_contains "tmux sessions" "picker overlay shows title" && pass || fail
+    assert_screen_contains "Sessions" "picker overlay shows title" && pass || fail
     assert_screen_contains "PICKER" "status bar shows PICKER mode" && pass || fail
 
     send j  # Navigate down
@@ -328,7 +328,7 @@ if true; then
     sleep 1
     capture "test10-first-launch"
     # Should open session picker since sessions exist
-    assert_screen_contains "tmux sessions" "first launch opens session picker" && pass || fail
+    assert_screen_contains "Sessions" "first launch opens session picker" && pass || fail
 
     send Enter  # Select first session
     sleep 2
