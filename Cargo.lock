@@ -1136,11 +1136,12 @@ dependencies = [
 
 [[package]]
 name = "tmuch"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ansi-to-tui",
  "anyhow",
  "azlin-azure",
+ "chrono",
  "clap",
  "clap_complete",
  "crossterm",

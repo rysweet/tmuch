@@ -2,6 +2,7 @@ mod app;
 mod azlin_integration;
 mod config;
 mod consts;
+mod ipc;
 mod keys;
 mod layout;
 mod layouts;
@@ -66,6 +67,12 @@ enum Commands {
         #[arg(short, long)]
         resource_group: Option<String>,
     },
+
+    /// Send a command to a running tmuch instance
+    Ctl {
+        /// JSON command to send (e.g. '{"command":"list_panes"}')
+        json: String,
+    },
 }
 
 fn main() -> anyhow::Result<()> {
@@ -92,6 +99,18 @@ fn main() -> anyhow::Result<()> {
         }
         Some(Commands::Azlin { resource_group }) => {
             return app::run_azlin(resource_group.clone());
+        }
+        Some(Commands::Ctl { json }) => {
+            match ipc::send_command(json) {
+                Ok(response) => {
+                    println!("{}", response);
+                }
+                Err(e) => {
+                    eprintln!("Error: {}", e);
+                    std::process::exit(1);
+                }
+            }
+            return Ok(());
         }
         None => {}
     }
