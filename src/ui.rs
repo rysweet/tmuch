@@ -96,12 +96,16 @@ pub fn draw(frame: &mut Frame, app: &App) {
 
         let inner = block.inner(*rect);
 
-        // Parse ANSI content
-        let text = pane.content.as_bytes().into_text().unwrap_or_default();
-
-        let paragraph = Paragraph::new(text).block(block);
-        frame.render_widget(paragraph, *rect);
-        let _ = inner; // inner used implicitly by block
+        if pane.source.has_custom_render() {
+            // Custom widget rendering path
+            frame.render_widget(block, *rect);
+            pane.source.render(inner, frame.buffer_mut());
+        } else {
+            // Standard text rendering path: parse ANSI content
+            let text = pane.content.as_bytes().into_text().unwrap_or_default();
+            let paragraph = Paragraph::new(text).block(block);
+            frame.render_widget(paragraph, *rect);
+        }
     }
 
     // Draw status bar

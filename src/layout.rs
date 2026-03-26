@@ -2,6 +2,17 @@ use ratatui::layout::Rect;
 
 pub type PaneId = u32;
 
+/// Reference to a split node found during hit-testing.
+#[derive(Debug, Clone)]
+pub struct SplitRef {
+    /// Path from the root to the split node (0 = first child, 1 = second child).
+    pub path: Vec<usize>,
+    /// Direction of the split.
+    pub direction: SplitDirection,
+    /// Area of the parent split node.
+    pub area: Rect,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SplitDirection {
     Horizontal,
@@ -146,6 +157,103 @@ impl LayoutNode {
             }
             LayoutNode::Split { first, second, .. } => {
                 first.split_leaf(target, new_id, dir) || second.split_leaf(target, new_id, dir)
+            }
+        }
+    }
+
+    /// Find the split whose boundary is near (x, y), within tolerance cells.
+    /// Returns a SplitRef if found.
+    pub fn find_split_at(&self, x: u16, y: u16, area: Rect, tolerance: u16) -> Option<SplitRef> {
+        self.find_split_at_inner(x, y, area, tolerance, &mut Vec::new())
+    }
+
+    fn find_split_at_inner(
+        &self,
+        x: u16,
+        y: u16,
+        area: Rect,
+        tolerance: u16,
+        path: &mut Vec<usize>,
+    ) -> Option<SplitRef> {
+        match self {
+            LayoutNode::Leaf(_) => None,
+            LayoutNode::Split {
+                direction,
+                ratio,
+                first,
+                second,
+            } => {
+                let (a, b) = split_rect(area, *direction, *ratio);
+
+                // Check if the position is near the boundary
+                let near_boundary = match direction {
+                    SplitDirection::Vertical => {
+                        // Boundary is at a.x + a.width (= b.x)
+                        let boundary_x = a.x + a.width;
+                        x >= boundary_x.saturating_sub(tolerance)
+                            && x <= boundary_x + tolerance
+                            && y >= area.y
+                            && y < area.y + area.height
+                    }
+                    SplitDirection::Horizontal => {
+                        // Boundary is at a.y + a.height (= b.y)
+                        let boundary_y = a.y + a.height;
+                        y >= boundary_y.saturating_sub(tolerance)
+                            && y <= boundary_y + tolerance
+                            && x >= area.x
+                            && x < area.x + area.width
+                    }
+                };
+
+                if near_boundary {
+                    return Some(SplitRef {
+                        path: path.clone(),
+                        direction: *direction,
+                        area,
+                    });
+                }
+
+                // Recurse into children
+                path.push(0);
+                if let Some(result) = first.find_split_at_inner(x, y, a, tolerance, path) {
+                    return Some(result);
+                }
+                path.pop();
+
+                path.push(1);
+                if let Some(result) = second.find_split_at_inner(x, y, b, tolerance, path) {
+                    return Some(result);
+                }
+                path.pop();
+
+                None
+            }
+        }
+    }
+
+    /// Update a split's ratio at the given path.
+    pub fn set_ratio_at(&mut self, path: &[usize], ratio: f32) {
+        if path.is_empty() {
+            // Apply ratio to this node
+            if let LayoutNode::Split {
+                ratio: ref mut r, ..
+            } = self
+            {
+                *r = ratio;
+            }
+            return;
+        }
+
+        if let LayoutNode::Split {
+            ref mut first,
+            ref mut second,
+            ..
+        } = self
+        {
+            match path[0] {
+                0 => first.set_ratio_at(&path[1..], ratio),
+                1 => second.set_ratio_at(&path[1..], ratio),
+                _ => {}
             }
         }
     }

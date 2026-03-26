@@ -1,12 +1,15 @@
 use crate::config::Config;
+use crate::ipc::{IpcCommand, IpcServer};
 use crate::keys::{self, Action, Mode};
 use crate::layout::{PaneId, SplitDirection};
 use crate::layouts;
 use crate::pane::PaneManager;
 use crate::session_picker::SessionPicker;
+use crate::source::clock::ClockSource;
 use crate::source::command::CommandSource;
 use crate::source::http::HttpSource;
 use crate::source::local_tmux::LocalTmuxSource;
+use crate::source::registry::PluginRegistry;
 use crate::source::ssh_subprocess::{RemoteConfig, SshSubprocessSource};
 use crate::source::tail::TailSource;
 use crate::source::{self, NewPaneRequest, PaneSpec};
@@ -21,6 +24,7 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::layout::Rect;
 use ratatui::Terminal;
 use std::io;
+use std::sync::mpsc;
 use std::time::Duration;
 
 /// State for the command editor overlay.
@@ -71,6 +75,16 @@ impl CommandEditorState {
     }
 }
 
+/// State for tracking border drag resize.
+pub struct DragState {
+    /// Path to the split node being dragged.
+    pub split_path: Vec<usize>,
+    /// Direction of the split being dragged.
+    pub direction: SplitDirection,
+    /// Area of the parent split node, used to compute ratios.
+    pub parent_area: Rect,
+}
+
 pub struct App {
     pub pane_manager: PaneManager,
     pub config: Config,
@@ -80,6 +94,8 @@ pub struct App {
     pub command_editor: Option<CommandEditorState>,
     pub pane_rects: Vec<(PaneId, Rect)>,
     pub theme: Theme,
+    pub plugin_registry: PluginRegistry,
+    pub drag_state: Option<DragState>,
 }
 
 impl App {
@@ -94,6 +110,8 @@ impl App {
             command_editor: None,
             pane_rects: Vec::new(),
             theme,
+            plugin_registry: PluginRegistry::new(),
+            drag_state: None,
         }
     }
 
@@ -140,6 +158,16 @@ impl App {
             PaneSpec::Http { url, interval_ms } => {
                 let source = HttpSource::new(url.clone(), *interval_ms);
                 self.pane_manager.add(Box::new(source));
+            }
+            PaneSpec::Plugin {
+                plugin_name,
+                config,
+            } => {
+                if let Some(source) = self.plugin_registry.create(plugin_name, config.clone()) {
+                    self.pane_manager.add(source);
+                } else {
+                    anyhow::bail!("Unknown plugin '{}'", plugin_name);
+                }
             }
             PaneSpec::Remote {
                 remote_name,
@@ -377,6 +405,158 @@ impl App {
         }
         Ok(())
     }
+
+    /// Handle an IPC command, returning a JSON response string.
+    pub fn handle_ipc(&mut self, cmd: IpcCommand) -> String {
+        match cmd {
+            IpcCommand::ListPanes => {
+                let panes: Vec<serde_json::Value> = self
+                    .pane_manager
+                    .panes()
+                    .iter()
+                    .map(|(id, p)| {
+                        serde_json::json!({
+                            "id": id,
+                            "name": p.name(),
+                            "source": p.source_label(),
+                        })
+                    })
+                    .collect();
+                serde_json::json!({ "ok": true, "panes": panes }).to_string()
+            }
+            IpcCommand::AddPane(spec) => match self.add_from_spec(&spec) {
+                Ok(()) => serde_json::json!({ "ok": true }).to_string(),
+                Err(e) => serde_json::json!({ "ok": false, "error": e.to_string() }).to_string(),
+            },
+            IpcCommand::RemovePane(id) => {
+                self.pane_manager.remove(id);
+                serde_json::json!({ "ok": true }).to_string()
+            }
+            IpcCommand::FocusPane(id) => {
+                self.pane_manager.focus_id(id);
+                serde_json::json!({ "ok": true }).to_string()
+            }
+            IpcCommand::Split { direction, spec } => {
+                let dir = if direction == "horizontal" {
+                    SplitDirection::Horizontal
+                } else {
+                    SplitDirection::Vertical
+                };
+                // Create the source from spec, then split
+                let result = match &spec {
+                    PaneSpec::LocalTmux {
+                        session,
+                        create_cmd,
+                    } => {
+                        if tmux::session_exists(session) {
+                            Ok(Box::new(LocalTmuxSource::attach(session.clone()))
+                                as Box<dyn crate::source::ContentSource>)
+                        } else {
+                            LocalTmuxSource::create(session.clone(), create_cmd.as_deref())
+                                .map(|s| Box::new(s) as Box<dyn crate::source::ContentSource>)
+                        }
+                    }
+                    PaneSpec::Command {
+                        command,
+                        interval_ms,
+                    } => Ok(Box::new(CommandSource::new(command.clone(), *interval_ms))
+                        as Box<dyn crate::source::ContentSource>),
+                    PaneSpec::Plugin {
+                        plugin_name,
+                        config,
+                    } => self
+                        .plugin_registry
+                        .create(plugin_name, config.clone())
+                        .ok_or_else(|| anyhow::anyhow!("Unknown plugin")),
+                    _ => Err(anyhow::anyhow!("Unsupported spec for split")),
+                };
+                match result {
+                    Ok(source) => {
+                        self.pane_manager.split_focused(dir, source);
+                        serde_json::json!({ "ok": true }).to_string()
+                    }
+                    Err(e) => {
+                        serde_json::json!({ "ok": false, "error": e.to_string() }).to_string()
+                    }
+                }
+            }
+            IpcCommand::Maximize(id) => {
+                self.pane_manager.focus_id(id);
+                self.pane_manager.toggle_maximize();
+                serde_json::json!({ "ok": true }).to_string()
+            }
+            IpcCommand::SendKeys { id, keys } => {
+                if let Some(pane) = self.pane_manager.get_mut(id) {
+                    let _ = pane.source.send_keys(&keys);
+                }
+                serde_json::json!({ "ok": true }).to_string()
+            }
+            IpcCommand::Quit => {
+                self.should_quit = true;
+                serde_json::json!({ "ok": true }).to_string()
+            }
+        }
+    }
+
+    /// Handle mouse-down for border drag detection.
+    pub fn handle_mouse_down(&mut self, col: u16, row: u16, main_area: Rect) {
+        // Check if click is on a split boundary for drag resize
+        if let Some(layout) = self.pane_manager.layout() {
+            if let Some(split_ref) = layout.find_split_at(col, row, main_area, 1) {
+                self.drag_state = Some(DragState {
+                    split_path: split_ref.path,
+                    direction: split_ref.direction,
+                    parent_area: split_ref.area,
+                });
+                return;
+            }
+        }
+
+        // Otherwise, focus the pane under cursor
+        for (id, rect) in &self.pane_rects {
+            if col >= rect.x
+                && col < rect.x + rect.width
+                && row >= rect.y
+                && row < rect.y + rect.height
+            {
+                self.pane_manager.focus_id(*id);
+                break;
+            }
+        }
+    }
+
+    /// Handle mouse drag for border resize.
+    pub fn handle_mouse_drag(&mut self, col: u16, row: u16) {
+        if let Some(ref drag) = self.drag_state {
+            let path = drag.split_path.clone();
+            let direction = drag.direction;
+            let parent_area = drag.parent_area;
+
+            let ratio = match direction {
+                SplitDirection::Vertical => {
+                    if parent_area.width == 0 {
+                        return;
+                    }
+                    let rel = col.saturating_sub(parent_area.x) as f32 / parent_area.width as f32;
+                    rel.clamp(0.1, 0.9)
+                }
+                SplitDirection::Horizontal => {
+                    if parent_area.height == 0 {
+                        return;
+                    }
+                    let rel = row.saturating_sub(parent_area.y) as f32 / parent_area.height as f32;
+                    rel.clamp(0.1, 0.9)
+                }
+            };
+
+            self.pane_manager.set_ratio_at(&path, ratio);
+        }
+    }
+
+    /// Handle mouse up — stop dragging.
+    pub fn handle_mouse_up(&mut self) {
+        self.drag_state = None;
+    }
 }
 
 /// Run azlin discovery: list all VMs and their tmux sessions, then launch TUI.
@@ -480,28 +660,26 @@ pub fn run_azlin(resource_group: Option<String>) -> Result<()> {
         }
 
         if event::poll(poll_duration)? {
+            let term_size = terminal.size()?;
+            let main_area = Rect::new(0, 1, term_size.width, term_size.height.saturating_sub(2));
             match event::read()? {
                 Event::Key(key) => {
                     if let Some(action) = keys::handle(key, &app.mode, &app.config) {
                         app.handle_action(action)?;
                     }
                 }
-                Event::Mouse(mouse) => {
-                    if let MouseEventKind::Down(crossterm::event::MouseButton::Left) = mouse.kind {
-                        let col = mouse.column;
-                        let row = mouse.row;
-                        for (id, rect) in &app.pane_rects {
-                            if col >= rect.x
-                                && col < rect.x + rect.width
-                                && row >= rect.y
-                                && row < rect.y + rect.height
-                            {
-                                app.pane_manager.focus_id(*id);
-                                break;
-                            }
-                        }
+                Event::Mouse(mouse) => match mouse.kind {
+                    MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
+                        app.handle_mouse_down(mouse.column, mouse.row, main_area);
                     }
-                }
+                    MouseEventKind::Drag(crossterm::event::MouseButton::Left) => {
+                        app.handle_mouse_drag(mouse.column, mouse.row);
+                    }
+                    MouseEventKind::Up(crossterm::event::MouseButton::Left) => {
+                        app.handle_mouse_up();
+                    }
+                    _ => {}
+                },
                 _ => {}
             }
         }
@@ -528,6 +706,10 @@ pub fn run(
     let mut terminal = Terminal::new(backend)?;
 
     let mut app = App::new(config);
+
+    // Start IPC server
+    let (ipc_tx, ipc_rx) = mpsc::channel();
+    let _ipc_server = IpcServer::start(ipc_tx).ok();
 
     // Load layout if specified
     if let Some(layout_name) = &layout {
@@ -568,6 +750,9 @@ pub fn run(
                 NewPaneRequest::Http { url, interval_ms } => {
                     let source = HttpSource::new(url, interval_ms);
                     app.pane_manager.add(Box::new(source));
+                }
+                NewPaneRequest::Clock => {
+                    app.pane_manager.add(Box::new(ClockSource));
                 }
             }
         }
@@ -630,30 +815,34 @@ pub fn run(
             break;
         }
 
+        // Handle IPC commands
+        while let Ok(msg) = ipc_rx.try_recv() {
+            let response = app.handle_ipc(msg.command);
+            let _ = msg.response_tx.send(response);
+        }
+
         // Handle events
         if event::poll(poll_duration)? {
+            let term_size = terminal.size()?;
+            let main_area = Rect::new(0, 1, term_size.width, term_size.height.saturating_sub(2));
             match event::read()? {
                 Event::Key(key) => {
                     if let Some(action) = keys::handle(key, &app.mode, &app.config) {
                         app.handle_action(action)?;
                     }
                 }
-                Event::Mouse(mouse) => {
-                    if let MouseEventKind::Down(crossterm::event::MouseButton::Left) = mouse.kind {
-                        let col = mouse.column;
-                        let row = mouse.row;
-                        for (id, rect) in &app.pane_rects {
-                            if col >= rect.x
-                                && col < rect.x + rect.width
-                                && row >= rect.y
-                                && row < rect.y + rect.height
-                            {
-                                app.pane_manager.focus_id(*id);
-                                break;
-                            }
-                        }
+                Event::Mouse(mouse) => match mouse.kind {
+                    MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
+                        app.handle_mouse_down(mouse.column, mouse.row, main_area);
                     }
-                }
+                    MouseEventKind::Drag(crossterm::event::MouseButton::Left) => {
+                        app.handle_mouse_drag(mouse.column, mouse.row);
+                    }
+                    MouseEventKind::Up(crossterm::event::MouseButton::Left) => {
+                        app.handle_mouse_up();
+                    }
+                    _ => {}
+                },
                 _ => {}
             }
         }

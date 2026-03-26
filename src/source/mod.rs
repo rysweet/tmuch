@@ -1,10 +1,14 @@
+pub mod clock;
 pub mod command;
 pub mod http;
 pub mod local_tmux;
+pub mod registry;
 pub mod ssh_subprocess;
 pub mod tail;
 
 use anyhow::Result;
+use ratatui::buffer::Buffer;
+use ratatui::layout::Rect;
 
 /// A content source that can provide terminal output for a pane.
 pub trait ContentSource: Send {
@@ -28,6 +32,15 @@ pub trait ContentSource: Send {
 
     /// Serialize back to a layout spec for saving.
     fn to_spec(&self) -> PaneSpec;
+
+    /// Whether this source renders custom widgets (instead of text capture).
+    fn has_custom_render(&self) -> bool {
+        false
+    }
+
+    /// Render custom widgets directly into the buffer.
+    /// Only called if has_custom_render() returns true.
+    fn render(&self, _area: Rect, _buf: &mut Buffer) {}
 }
 
 /// Specification for recreating a pane from a layout file.
@@ -59,6 +72,12 @@ pub enum PaneSpec {
         #[serde(default = "default_http_interval")]
         interval_ms: u64,
     },
+    #[serde(rename = "plugin")]
+    Plugin {
+        plugin_name: String,
+        #[serde(default = "default_plugin_config")]
+        config: toml::Value,
+    },
 }
 
 fn default_http_interval() -> u64 {
@@ -69,9 +88,16 @@ fn default_interval() -> u64 {
     5000
 }
 
+fn default_plugin_config() -> toml::Value {
+    toml::Value::Table(toml::map::Map::new())
+}
+
 /// Parse a `-n` argument into a content source.
-/// Supports prefixes: `watch:cmd:interval`, `tail:path`, or plain tmux command.
+/// Supports prefixes: `watch:cmd:interval`, `tail:path`, `clock:`, or plain tmux command.
 pub fn parse_new_arg(arg: &str) -> NewPaneRequest {
+    if arg == "clock:" || arg == "clock" {
+        return NewPaneRequest::Clock;
+    }
     if let Some(rest) = arg.strip_prefix("tail:") {
         NewPaneRequest::Tail {
             path: rest.to_string(),
@@ -119,4 +145,5 @@ pub enum NewPaneRequest {
     Command { command: String, interval_ms: u64 },
     Tail { path: String },
     Http { url: String, interval_ms: u64 },
+    Clock,
 }

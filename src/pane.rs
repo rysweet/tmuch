@@ -293,6 +293,18 @@ impl PaneManager {
         }
     }
 
+    /// Get a reference to the layout tree (for split detection).
+    pub fn layout(&self) -> Option<&LayoutNode> {
+        self.layout.as_ref()
+    }
+
+    /// Update a split's ratio at the given path.
+    pub fn set_ratio_at(&mut self, path: &[usize], ratio: f32) {
+        if let Some(ref mut layout) = self.layout {
+            layout.set_ratio_at(path, ratio);
+        }
+    }
+
     /// Rebuild the auto-grid layout from current pane IDs.
     fn rebuild_auto_grid(&mut self) {
         let ids = {

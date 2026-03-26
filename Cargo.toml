@@ -18,6 +18,7 @@ serde_json = "1"
 dirs = "6"
 shellexpand = "3"
 libc = "0.2"
+chrono = { version = "0.4", features = ["clock"] }
 
 # Azure VM discovery (azlin-azure uses az CLI, no async needed)
 azlin-azure = { git = "https://github.com/rysweet/azlin" }
