@@ -17,7 +17,6 @@ pub struct SshSubprocessSource {
     latest_content: Arc<Mutex<String>>,
     error: Arc<Mutex<Option<String>>>,
     shutdown: Arc<Mutex<bool>>,
-    dimensions: Arc<Mutex<(u16, u16)>>,
     display_name: String,
     label: String,
 }
@@ -34,14 +33,12 @@ impl SshSubprocessSource {
         let latest_content = Arc::new(Mutex::new(String::new()));
         let error = Arc::new(Mutex::new(None));
         let shutdown = Arc::new(Mutex::new(false));
-        let dimensions = Arc::new(Mutex::new((80u16, 24u16)));
         let display_name = format!("{}:{}", name, session);
         let label = format!("ssh:{}", name);
 
         let content_clone = Arc::clone(&latest_content);
         let error_clone = Arc::clone(&error);
         let shutdown_clone = Arc::clone(&shutdown);
-        let dims_clone = Arc::clone(&dimensions);
         let host_clone = host.clone();
         let user_clone = user.clone();
         let session_clone = session.clone();
@@ -54,10 +51,11 @@ impl SshSubprocessSource {
                     break;
                 }
 
-                let (w, h) = *dims_clone.lock().unwrap();
+                // Capture without resizing — resizing remote windows causes
+                // them to stay tiny after tmuch exits (issue #14)
                 let cmd = format!(
-                    "tmux resize-window -t {} -x {} -y {} 2>/dev/null; tmux capture-pane -p -e -t {} 2>/dev/null || echo '[session not found]'",
-                    shell_escape(&session_clone), w, h, shell_escape(&session_clone)
+                    "tmux capture-pane -p -e -t {} 2>/dev/null || echo '[session not found]'",
+                    shell_escape(&session_clone)
                 );
 
                 let result = run_ssh_command(&host_clone, &user_clone, port, &cmd);
@@ -84,7 +82,6 @@ impl SshSubprocessSource {
             latest_content,
             error,
             shutdown,
-            dimensions,
             display_name,
             label,
         }
@@ -144,9 +141,7 @@ fn shell_escape(s: &str) -> String {
 }
 
 impl ContentSource for SshSubprocessSource {
-    fn capture(&mut self, width: u16, height: u16) -> Result<String> {
-        *self.dimensions.lock().unwrap() = (width, height);
-
+    fn capture(&mut self, _width: u16, _height: u16) -> Result<String> {
         if let Some(err) = self.error.lock().unwrap().as_ref() {
             return Ok(format!("[{}]\n\n{}\n\nRetrying...", self.display_name, err));
         }
@@ -185,6 +180,13 @@ impl ContentSource for SshSubprocessSource {
 
     fn cleanup(&mut self) {
         *self.shutdown.lock().unwrap() = true;
+
+        // Restore remote window to automatic size
+        let cmd = format!(
+            "tmux resize-window -t {} -A 2>/dev/null; true",
+            shell_escape(&self.session)
+        );
+        let _ = run_ssh_command(&self.host, &self.user, self.port, &cmd);
     }
 
     fn to_spec(&self) -> PaneSpec {
