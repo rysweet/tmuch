@@ -23,12 +23,19 @@ pub struct App {
     pub plugin_registry: PluginRegistry,
     pub drag_state: Option<DragState>,
     pub app_launcher: Option<AppLauncherState>,
-    /// Busy indicator message — shown in status bar when set
+    /// Busy indicator message — shown in status bar + overlay when set
     pub busy: Option<String>,
     /// Spinner frame counter
     pub spinner_tick: usize,
     /// Currently highlighted menu tab index (for keyboard navigation)
     pub selected_hint: usize,
+    /// Background task result receiver (for async operations like azlin discovery)
+    pub bg_result: Option<std::sync::mpsc::Receiver<BgTaskResult>>,
+}
+
+/// Result from a background task.
+pub enum BgTaskResult {
+    AzlinSessions(Vec<crate::tmux::SessionInfo>),
 }
 
 impl App {
@@ -49,6 +56,7 @@ impl App {
             busy: None,
             spinner_tick: 0,
             selected_hint: 0,
+            bg_result: None,
         }
     }
 

@@ -70,40 +70,46 @@ pub fn handle_action(app: &mut App, action: Action) -> Result<()> {
                 let _ = pane.source.send_keys(&keys);
             }
         }
-        Action::DiscoverAzlin => {
+        Action::DiscoverAzlin | Action::PickerScanAzlin => {
+            // Spawn discovery on a background thread so the UI stays responsive
             app.busy = Some("Discovering Azure VMs...".into());
-            if app.config.azlin.enabled {
-                app.picker
-                    .refresh_with_remotes(&app.config.remote, &app.config.azlin)?;
-            } else {
-                let azlin_cfg = crate::azlin_integration::AzlinConfig {
-                    enabled: true,
-                    resource_group: None,
-                    default_user: None,
-                };
-                app.picker
-                    .refresh_with_remotes(&app.config.remote, &azlin_cfg)?;
-            }
-            app.busy = None;
-            app.mode = Mode::SessionPicker;
-        }
-        Action::PickerScanAzlin => {
-            app.busy = Some("Scanning azlin VMs...".into());
-            let rg = app.config.azlin.resource_group.as_deref();
-            let result = crate::azlin_integration::discover_remote_sessions_sync(rg);
-            if let Ok(remote_sessions) = result {
-                for session in remote_sessions {
-                    let already_listed = app
-                        .picker
-                        .sessions
-                        .iter()
-                        .any(|s| s.name == session.name && s.host == session.host);
-                    if !already_listed {
-                        app.picker.sessions.push(session);
+            crate::dlog!("Starting azlin discovery in background...");
+
+            let (tx, rx) = std::sync::mpsc::channel();
+            app.bg_result = Some(rx);
+
+            let rg = app.config.azlin.resource_group.clone();
+            let remotes = app.config.remote.clone();
+            let azlin_cfg = app.config.azlin.clone();
+
+            std::thread::spawn(move || {
+                // Collect local tmux sessions
+                let mut sessions = crate::tmux::list_sessions().unwrap_or_default();
+
+                // Collect remote sessions from configured hosts
+                for remote in &remotes {
+                    if let Ok(names) = crate::source::ssh_subprocess::list_remote_sessions(remote) {
+                        for name in names {
+                            sessions.push(crate::tmux::SessionInfo {
+                                name,
+                                attached: false,
+                                host: Some(remote.name.clone()),
+                            });
+                        }
                     }
                 }
-            }
-            app.busy = None;
+
+                // Collect azlin VM sessions
+                if azlin_cfg.enabled || rg.is_some() {
+                    if let Ok(remote_sessions) =
+                        crate::azlin_integration::discover_remote_sessions_sync(rg.as_deref())
+                    {
+                        sessions.extend(remote_sessions);
+                    }
+                }
+
+                let _ = tx.send(crate::app::BgTaskResult::AzlinSessions(sessions));
+            });
         }
         Action::PickerAddAll => {
             let sessions: Vec<_> = app.picker.sessions.clone();

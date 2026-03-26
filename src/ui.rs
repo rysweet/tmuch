@@ -7,7 +7,7 @@ use ansi_to_tui::IntoText;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
+use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 use ratatui::Frame;
 
 pub fn draw(frame: &mut Frame, app: &App) {
@@ -145,6 +145,37 @@ pub fn draw(frame: &mut Frame, app: &App) {
     if app.mode == Mode::AppLauncher {
         draw_app_launcher(frame, app, main_area);
     }
+
+    // Working overlay when busy
+    if app.busy.is_some() {
+        draw_busy_overlay(frame, app, main_area);
+    }
+}
+
+fn draw_busy_overlay(frame: &mut Frame, app: &App, area: Rect) {
+    let msg = app.busy.as_deref().unwrap_or("Working...");
+    const SPINNER: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+    let s = SPINNER[app.spinner_tick % SPINNER.len()];
+
+    let w = 40.min(area.width.saturating_sub(4));
+    let h = 5.min(area.height.saturating_sub(4));
+    let x = area.x + (area.width.saturating_sub(w)) / 2;
+    let y = area.y + (area.height.saturating_sub(h)) / 2;
+    let popup = Rect::new(x, y, w, h);
+
+    frame.render_widget(Clear, popup);
+
+    let text = format!("\n  {} {}\n\n  Press Esc to cancel", s, msg);
+    let para = Paragraph::new(text)
+        .style(Style::default().fg(Color::Yellow))
+        .block(
+            Block::default()
+                .title(" Working ")
+                .borders(Borders::ALL)
+                .border_type(BorderType::Double)
+                .border_style(Style::default().fg(Color::Yellow)),
+        );
+    frame.render_widget(para, popup);
 }
 
 fn draw_log_line(frame: &mut Frame, app: &App, area: Rect) {
