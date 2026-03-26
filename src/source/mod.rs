@@ -3,8 +3,12 @@ pub mod command;
 pub mod http;
 pub mod local_tmux;
 pub mod registry;
+pub mod snake;
+pub mod sparkline_monitor;
 pub mod ssh_subprocess;
+pub mod sysinfo;
 pub mod tail;
+pub mod weather;
 
 use anyhow::Result;
 use ratatui::buffer::Buffer;
@@ -98,6 +102,52 @@ pub fn parse_new_arg(arg: &str) -> NewPaneRequest {
     if arg == "clock:" || arg == "clock" {
         return NewPaneRequest::Clock;
     }
+    if arg == "snake:" || arg == "snake" {
+        return NewPaneRequest::Snake;
+    }
+    if let Some(rest) = arg.strip_prefix("weather:") {
+        // Format: weather:city or weather:city:interval_ms
+        let parts: Vec<&str> = rest.rsplitn(2, ':').collect();
+        if parts.len() == 2 {
+            if let Ok(interval) = parts[0].parse::<u64>() {
+                return NewPaneRequest::Weather {
+                    city: parts[1].to_string(),
+                    interval_ms: interval,
+                };
+            }
+        }
+        return NewPaneRequest::Weather {
+            city: rest.to_string(),
+            interval_ms: 300_000, // 5 minutes default
+        };
+    }
+    if let Some(rest) = arg.strip_prefix("sysinfo:") {
+        let interval_ms = if rest.is_empty() {
+            2000
+        } else {
+            rest.parse::<u64>().unwrap_or(2000)
+        };
+        return NewPaneRequest::SysInfo { interval_ms };
+    }
+    if arg == "sysinfo" {
+        return NewPaneRequest::SysInfo { interval_ms: 2000 };
+    }
+    if let Some(rest) = arg.strip_prefix("spark:") {
+        // Format: spark:command:interval_ms
+        let parts: Vec<&str> = rest.rsplitn(2, ':').collect();
+        if parts.len() == 2 {
+            if let Ok(interval) = parts[0].parse::<u64>() {
+                return NewPaneRequest::Sparkline {
+                    command: parts[1].to_string(),
+                    interval_ms: interval,
+                };
+            }
+        }
+        return NewPaneRequest::Sparkline {
+            command: rest.to_string(),
+            interval_ms: 2000,
+        };
+    }
     if let Some(rest) = arg.strip_prefix("tail:") {
         NewPaneRequest::Tail {
             path: rest.to_string(),
@@ -146,4 +196,8 @@ pub enum NewPaneRequest {
     Tail { path: String },
     Http { url: String, interval_ms: u64 },
     Clock,
+    Weather { city: String, interval_ms: u64 },
+    SysInfo { interval_ms: u64 },
+    Snake,
+    Sparkline { command: String, interval_ms: u64 },
 }

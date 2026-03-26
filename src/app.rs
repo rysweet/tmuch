@@ -10,8 +10,12 @@ use crate::source::command::CommandSource;
 use crate::source::http::HttpSource;
 use crate::source::local_tmux::LocalTmuxSource;
 use crate::source::registry::PluginRegistry;
+use crate::source::snake::SnakeSource;
+use crate::source::sparkline_monitor::SparklineSource;
 use crate::source::ssh_subprocess::{RemoteConfig, SshSubprocessSource};
+use crate::source::sysinfo::SysInfoSource;
 use crate::source::tail::TailSource;
+use crate::source::weather::WeatherSource;
 use crate::source::{self, NewPaneRequest, PaneSpec};
 use crate::theme::Theme;
 use crate::tmux;
@@ -753,6 +757,24 @@ pub fn run(
                 }
                 NewPaneRequest::Clock => {
                     app.pane_manager.add(Box::new(ClockSource));
+                }
+                NewPaneRequest::Weather { city, interval_ms } => {
+                    app.pane_manager
+                        .add(Box::new(WeatherSource::new(city, interval_ms)));
+                }
+                NewPaneRequest::SysInfo { interval_ms } => {
+                    app.pane_manager
+                        .add(Box::new(SysInfoSource::new(interval_ms)));
+                }
+                NewPaneRequest::Snake => {
+                    app.pane_manager.add(Box::new(SnakeSource::new()));
+                }
+                NewPaneRequest::Sparkline {
+                    command,
+                    interval_ms,
+                } => {
+                    app.pane_manager
+                        .add(Box::new(SparklineSource::new(command, interval_ms)));
                 }
             }
         }
