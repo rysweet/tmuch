@@ -62,7 +62,7 @@ pub fn vm_to_remote_config(vm: &VmInfo) -> Result<RemoteConfig> {
     let user = vm
         .admin_username
         .clone()
-        .unwrap_or_else(|| "azureuser".to_string());
+        .unwrap_or_else(|| std::env::var("USER").unwrap_or_else(|_| "azureuser".to_string()));
 
     let key = resolve_ssh_key();
 
@@ -127,7 +127,6 @@ pub fn discover_remote_sessions_sync(resource_group: Option<&str>) -> Result<Vec
                     sessions.push(SessionInfo {
                         name: name.to_string(),
                         attached: false,
-                        windows: 0,
                         host: Some(vm.name.clone()),
                     });
                 }

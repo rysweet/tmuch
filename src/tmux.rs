@@ -1,12 +1,10 @@
 use anyhow::{Context, Result};
 use std::process::Command;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SessionInfo {
     pub name: String,
     pub attached: bool,
-    #[allow(dead_code)]
-    pub windows: u32,
     /// None for local sessions, Some("hostname") for remote
     pub host: Option<String>,
 }
@@ -28,7 +26,7 @@ pub fn list_sessions() -> Result<Vec<SessionInfo>> {
     let output = match run_tmux(&[
         "list-sessions",
         "-F",
-        "#{session_name}\t#{session_attached}\t#{session_windows}",
+        "#{session_name}\t#{session_attached}",
     ]) {
         Ok(o) => o,
         Err(_) => return Ok(Vec::new()), // no server running
@@ -36,11 +34,10 @@ pub fn list_sessions() -> Result<Vec<SessionInfo>> {
     let mut sessions = Vec::new();
     for line in output.lines() {
         let parts: Vec<&str> = line.split('\t').collect();
-        if parts.len() >= 3 {
+        if parts.len() >= 2 {
             sessions.push(SessionInfo {
                 name: parts[0].to_string(),
                 attached: parts[1] != "0",
-                windows: parts[2].parse().unwrap_or(1),
                 host: None,
             });
         }

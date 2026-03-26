@@ -87,23 +87,6 @@ pub struct CommandEditorState {
 }
 
 impl CommandEditorState {
-    #[allow(dead_code)]
-    pub fn from_config(config: &Config) -> Self {
-        let mut entries: Vec<(char, String)> = config
-            .bindings
-            .iter()
-            .map(|(k, v)| (*k, v.clone()))
-            .collect();
-        entries.sort_by_key(|(k, _)| *k);
-        Self {
-            entries,
-            selected: 0,
-            input_mode: EditorInputMode::Browse,
-            input_buffer: String::new(),
-            pending_key: None,
-        }
-    }
-
     pub fn select_next(&mut self) {
         if !self.entries.is_empty() {
             self.selected = (self.selected + 1) % self.entries.len();
@@ -507,9 +490,6 @@ impl App {
             Action::EditorClose => {
                 self.command_editor = None;
                 self.mode = Mode::Normal;
-            }
-            Action::FocusPane(id) => {
-                self.pane_manager.focus_id(id);
             }
             Action::SplitVertical => {
                 let name = tmux::generate_session_name();

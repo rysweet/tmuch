@@ -4,6 +4,7 @@ pub mod http;
 pub mod local_tmux;
 pub mod registry;
 pub mod settings;
+mod settings_render;
 pub mod snake;
 pub mod sparkline_monitor;
 pub mod ssh_subprocess;
@@ -205,4 +206,107 @@ pub enum NewPaneRequest {
     Snake,
     Sparkline { command: String, interval_ms: u64 },
     Settings,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_clock() {
+        assert!(matches!(parse_new_arg("clock"), NewPaneRequest::Clock));
+        assert!(matches!(parse_new_arg("clock:"), NewPaneRequest::Clock));
+    }
+
+    #[test]
+    fn test_parse_snake() {
+        assert!(matches!(parse_new_arg("snake"), NewPaneRequest::Snake));
+    }
+
+    #[test]
+    fn test_parse_weather_with_city() {
+        match parse_new_arg("weather:London") {
+            NewPaneRequest::Weather { city, interval_ms } => {
+                assert_eq!(city, "London");
+                assert_eq!(interval_ms, 300_000);
+            }
+            _ => panic!("expected Weather"),
+        }
+    }
+
+    #[test]
+    fn test_parse_weather_with_interval() {
+        match parse_new_arg("weather:Paris:60000") {
+            NewPaneRequest::Weather { city, interval_ms } => {
+                assert_eq!(city, "Paris");
+                assert_eq!(interval_ms, 60000);
+            }
+            _ => panic!("expected Weather"),
+        }
+    }
+
+    #[test]
+    fn test_parse_sysinfo() {
+        match parse_new_arg("sysinfo") {
+            NewPaneRequest::SysInfo { interval_ms } => assert_eq!(interval_ms, 2000),
+            _ => panic!("expected SysInfo"),
+        }
+    }
+
+    #[test]
+    fn test_parse_sysinfo_with_interval() {
+        match parse_new_arg("sysinfo:5000") {
+            NewPaneRequest::SysInfo { interval_ms } => assert_eq!(interval_ms, 5000),
+            _ => panic!("expected SysInfo"),
+        }
+    }
+
+    #[test]
+    fn test_parse_tail() {
+        match parse_new_arg("tail:/var/log/syslog") {
+            NewPaneRequest::Tail { path } => assert_eq!(path, "/var/log/syslog"),
+            _ => panic!("expected Tail"),
+        }
+    }
+
+    #[test]
+    fn test_parse_watch() {
+        match parse_new_arg("watch:df -h:3000") {
+            NewPaneRequest::Command {
+                command,
+                interval_ms,
+            } => {
+                assert_eq!(command, "df -h");
+                assert_eq!(interval_ms, 3000);
+            }
+            _ => panic!("expected Command"),
+        }
+    }
+
+    #[test]
+    fn test_parse_http() {
+        match parse_new_arg("http:example.com/api") {
+            NewPaneRequest::Http { url, interval_ms } => {
+                assert_eq!(url, "example.com/api");
+                assert_eq!(interval_ms, 5000);
+            }
+            _ => panic!("expected Http"),
+        }
+    }
+
+    #[test]
+    fn test_parse_plain_command() {
+        match parse_new_arg("htop") {
+            NewPaneRequest::TmuxCommand { command } => assert_eq!(command, "htop"),
+            _ => panic!("expected TmuxCommand"),
+        }
+    }
+
+    #[test]
+    fn test_parse_settings() {
+        assert!(matches!(
+            parse_new_arg("settings"),
+            NewPaneRequest::Settings
+        ));
+    }
 }

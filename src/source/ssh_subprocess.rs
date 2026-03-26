@@ -25,7 +25,7 @@ pub struct RemoteConfig {
 }
 
 fn default_user() -> String {
-    "azureuser".into()
+    std::env::var("USER").unwrap_or_else(|_| "azureuser".into())
 }
 fn default_port() -> u16 {
     22
