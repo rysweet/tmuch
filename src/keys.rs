@@ -1,4 +1,5 @@
 use crate::config::Config;
+use crate::layout::PaneId;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,7 +34,12 @@ pub enum Action {
     EditorDown,
     EditorDelete,
     EditorClose,
-    FocusPane(usize),
+    #[allow(dead_code)]
+    FocusPane(PaneId),
+    SplitVertical,
+    SplitHorizontal,
+    ToggleMaximize,
+    SwapPane,
 }
 
 pub fn handle(event: KeyEvent, mode: &Mode, config: &Config) -> Option<Action> {
@@ -55,6 +61,10 @@ fn handle_normal(event: KeyEvent, config: &Config) -> Option<Action> {
             KeyCode::Char('s') => Some(Action::OpenSessionPicker),
             KeyCode::Char('z') => Some(Action::DiscoverAzlin),
             KeyCode::Char('e') => Some(Action::OpenCommandEditor),
+            KeyCode::Char('v') => Some(Action::SplitVertical),
+            KeyCode::Char('h') => Some(Action::SplitHorizontal),
+            KeyCode::Char('f') => Some(Action::ToggleMaximize),
+            KeyCode::Char('x') => Some(Action::SwapPane),
             _ => None,
         };
     }
@@ -64,6 +74,7 @@ fn handle_normal(event: KeyEvent, config: &Config) -> Option<Action> {
         KeyCode::BackTab => Some(Action::FocusPrev),
         KeyCode::Enter => Some(Action::EnterPaneMode),
         KeyCode::Char('q') => Some(Action::Quit),
+        KeyCode::F(11) => Some(Action::ToggleMaximize),
         // Arrow keys for pane navigation
         KeyCode::Down | KeyCode::Right => Some(Action::FocusNext),
         KeyCode::Up | KeyCode::Left => Some(Action::FocusPrev),

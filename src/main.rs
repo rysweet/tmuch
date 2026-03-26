@@ -9,6 +9,7 @@ mod pane;
 mod self_update;
 mod session_picker;
 mod source;
+mod theme;
 mod tmux;
 mod ui;
 mod update_check;

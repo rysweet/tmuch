@@ -1,5 +1,6 @@
 use crate::config::Config;
 use crate::keys::{self, Action, Mode};
+use crate::layout::{PaneId, SplitDirection};
 use crate::layouts;
 use crate::pane::PaneManager;
 use crate::session_picker::SessionPicker;
@@ -9,6 +10,7 @@ use crate::source::local_tmux::LocalTmuxSource;
 use crate::source::ssh_subprocess::{RemoteConfig, SshSubprocessSource};
 use crate::source::tail::TailSource;
 use crate::source::{self, NewPaneRequest, PaneSpec};
+use crate::theme::Theme;
 use crate::tmux;
 use crate::ui;
 use anyhow::Result;
@@ -76,11 +78,13 @@ pub struct App {
     pub picker: SessionPicker,
     pub should_quit: bool,
     pub command_editor: Option<CommandEditorState>,
-    pub pane_rects: Vec<Rect>,
+    pub pane_rects: Vec<(PaneId, Rect)>,
+    pub theme: Theme,
 }
 
 impl App {
     pub fn new(config: Config) -> Self {
+        let theme = Theme::load();
         Self {
             pane_manager: PaneManager::new(),
             config,
@@ -89,6 +93,7 @@ impl App {
             should_quit: false,
             command_editor: None,
             pane_rects: Vec::new(),
+            theme,
         }
     }
 
@@ -346,8 +351,28 @@ impl App {
                 self.command_editor = None;
                 self.mode = Mode::Normal;
             }
-            Action::FocusPane(idx) => {
-                self.pane_manager.focus_index(idx);
+            Action::FocusPane(id) => {
+                self.pane_manager.focus_id(id);
+            }
+            Action::SplitVertical => {
+                let name = tmux::generate_session_name();
+                if let Ok(source) = LocalTmuxSource::create(name, None) {
+                    self.pane_manager
+                        .split_focused(SplitDirection::Vertical, Box::new(source));
+                }
+            }
+            Action::SplitHorizontal => {
+                let name = tmux::generate_session_name();
+                if let Ok(source) = LocalTmuxSource::create(name, None) {
+                    self.pane_manager
+                        .split_focused(SplitDirection::Horizontal, Box::new(source));
+                }
+            }
+            Action::ToggleMaximize => {
+                self.pane_manager.toggle_maximize();
+            }
+            Action::SwapPane => {
+                self.pane_manager.swap_focused_with_next();
             }
         }
         Ok(())
@@ -432,16 +457,14 @@ pub fn run_azlin(resource_group: Option<String>) -> Result<()> {
         let pane_count = app.pane_manager.count();
         if pane_count > 0 {
             // Reserve 2 rows: top hint bar + bottom status bar
-            let rects = crate::layout::compute(
-                pane_count,
-                Rect::new(0, 1, term_size.width, term_size.height.saturating_sub(2)),
-            );
+            let main_area = Rect::new(0, 1, term_size.width, term_size.height.saturating_sub(2));
+            let rects = app.pane_manager.resolve_layout(main_area);
             app.pane_rects = rects.clone();
-            for (i, pane) in app.pane_manager.panes_mut().iter_mut().enumerate() {
-                if let Some(rect) = rects.get(i) {
-                    let w = rect.width.saturating_sub(2);
-                    let h = rect.height.saturating_sub(2);
-                    if w > 0 && h > 0 {
+            for (id, rect) in &rects {
+                let w = rect.width.saturating_sub(2);
+                let h = rect.height.saturating_sub(2);
+                if w > 0 && h > 0 {
+                    if let Some(pane) = app.pane_manager.get_mut(*id) {
                         if let Ok(content) = pane.source.capture(w, h) {
                             pane.content = content;
                         }
@@ -467,13 +490,13 @@ pub fn run_azlin(resource_group: Option<String>) -> Result<()> {
                     if let MouseEventKind::Down(crossterm::event::MouseButton::Left) = mouse.kind {
                         let col = mouse.column;
                         let row = mouse.row;
-                        for (idx, rect) in app.pane_rects.iter().enumerate() {
+                        for (id, rect) in &app.pane_rects {
                             if col >= rect.x
                                 && col < rect.x + rect.width
                                 && row >= rect.y
                                 && row < rect.y + rect.height
                             {
-                                app.handle_action(Action::FocusPane(idx))?;
+                                app.pane_manager.focus_id(*id);
                                 break;
                             }
                         }
@@ -569,18 +592,31 @@ pub fn run(
         let pane_count = app.pane_manager.count();
         if pane_count > 0 {
             // Reserve 2 rows: top hint bar + bottom status bar
-            let rects = crate::layout::compute(
-                pane_count,
-                Rect::new(0, 1, term_size.width, term_size.height.saturating_sub(2)),
-            );
-            app.pane_rects = rects.clone();
-            for (i, pane) in app.pane_manager.panes_mut().iter_mut().enumerate() {
-                if let Some(rect) = rects.get(i) {
+            let main_area = Rect::new(0, 1, term_size.width, term_size.height.saturating_sub(2));
+
+            // If maximized, only capture the maximized pane at full area
+            if let Some(max_id) = app.pane_manager.maximized {
+                app.pane_rects = vec![(max_id, main_area)];
+                let w = main_area.width.saturating_sub(2);
+                let h = main_area.height.saturating_sub(2);
+                if w > 0 && h > 0 {
+                    if let Some(pane) = app.pane_manager.get_mut(max_id) {
+                        if let Ok(content) = pane.source.capture(w, h) {
+                            pane.content = content;
+                        }
+                    }
+                }
+            } else {
+                let rects = app.pane_manager.resolve_layout(main_area);
+                app.pane_rects = rects.clone();
+                for (id, rect) in &rects {
                     let w = rect.width.saturating_sub(2);
                     let h = rect.height.saturating_sub(2);
                     if w > 0 && h > 0 {
-                        if let Ok(content) = pane.source.capture(w, h) {
-                            pane.content = content;
+                        if let Some(pane) = app.pane_manager.get_mut(*id) {
+                            if let Ok(content) = pane.source.capture(w, h) {
+                                pane.content = content;
+                            }
                         }
                     }
                 }
@@ -606,13 +642,13 @@ pub fn run(
                     if let MouseEventKind::Down(crossterm::event::MouseButton::Left) = mouse.kind {
                         let col = mouse.column;
                         let row = mouse.row;
-                        for (idx, rect) in app.pane_rects.iter().enumerate() {
+                        for (id, rect) in &app.pane_rects {
                             if col >= rect.x
                                 && col < rect.x + rect.width
                                 && row >= rect.y
                                 && row < rect.y + rect.height
                             {
-                                app.handle_action(Action::FocusPane(idx))?;
+                                app.pane_manager.focus_id(*id);
                                 break;
                             }
                         }
@@ -629,7 +665,7 @@ pub fn run(
             .pane_manager
             .panes()
             .iter()
-            .map(|p| p.source.to_spec())
+            .map(|(_, p)| p.source.to_spec())
             .collect();
         layouts::save(&layouts::LayoutSpec {
             name: layout_name,

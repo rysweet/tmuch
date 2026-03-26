@@ -15,6 +15,10 @@ pub struct Config {
     pub remote: Vec<RemoteConfig>,
     #[serde(default)]
     pub azlin: AzlinConfig,
+    /// Optional path to a theme file; None uses default (~/.config/tmuch/theme.toml).
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub theme: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
