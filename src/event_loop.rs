@@ -72,7 +72,10 @@ pub fn run_azlin(resource_group: Option<String>) -> Result<()> {
     // Launch TUI with all discovered sessions
     terminal::enable_raw_mode()?;
     io::stdout().execute(EnterAlternateScreen)?;
-    io::stdout().execute(EnableMouseCapture)?;
+    let mouse_enabled = config.display.mouse;
+    if mouse_enabled {
+        io::stdout().execute(EnableMouseCapture)?;
+    }
     let backend = CrosstermBackend::new(io::stdout());
     let mut terminal = Terminal::new(backend)?;
 
@@ -111,11 +114,20 @@ pub fn run_azlin(resource_group: Option<String>) -> Result<()> {
             let term_size = terminal.size()?;
             let main_area = Rect::new(0, 1, term_size.width, term_size.height.saturating_sub(2));
             handle_event(&mut app, event::read()?, main_area)?;
+            // Drain all remaining queued events this iteration
+            while event::poll(Duration::ZERO)? {
+                handle_event(&mut app, event::read()?, main_area)?;
+                if app.should_quit {
+                    break;
+                }
+            }
         }
     }
 
     terminal::disable_raw_mode()?;
-    io::stdout().execute(DisableMouseCapture)?;
+    if mouse_enabled {
+        io::stdout().execute(DisableMouseCapture)?;
+    }
     io::stdout().execute(LeaveAlternateScreen)?;
     Ok(())
 }
@@ -130,7 +142,10 @@ pub fn run(
     // Setup terminal
     terminal::enable_raw_mode()?;
     io::stdout().execute(EnterAlternateScreen)?;
-    io::stdout().execute(EnableMouseCapture)?;
+    let mouse_enabled = config.display.mouse;
+    if mouse_enabled {
+        io::stdout().execute(EnableMouseCapture)?;
+    }
     let backend = CrosstermBackend::new(io::stdout());
     let mut terminal = Terminal::new(backend)?;
 
@@ -177,6 +192,13 @@ pub fn run(
             let term_size = terminal.size()?;
             let main_area = Rect::new(0, 1, term_size.width, term_size.height.saturating_sub(2));
             handle_event(&mut app, event::read()?, main_area)?;
+            // Drain all remaining queued events this iteration
+            while event::poll(Duration::ZERO)? {
+                handle_event(&mut app, event::read()?, main_area)?;
+                if app.should_quit {
+                    break;
+                }
+            }
         }
     }
 
@@ -196,7 +218,9 @@ pub fn run(
 
     // Cleanup
     terminal::disable_raw_mode()?;
-    io::stdout().execute(DisableMouseCapture)?;
+    if mouse_enabled {
+        io::stdout().execute(DisableMouseCapture)?;
+    }
     io::stdout().execute(LeaveAlternateScreen)?;
 
     Ok(())
@@ -267,6 +291,9 @@ fn handle_event(app: &mut App, ev: Event, main_area: Rect) -> Result<()> {
             }
             _ => {}
         },
+        Event::Resize(_, _) => {
+            // Terminal resized — next draw loop iteration will pick up new size
+        }
         _ => {}
     }
     Ok(())

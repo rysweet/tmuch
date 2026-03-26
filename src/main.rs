@@ -51,6 +51,10 @@ struct Cli {
     /// Save current layout on exit
     #[arg(long = "save-layout", value_name = "NAME")]
     save_layout: Option<String>,
+
+    /// Disable mouse support (fixes key issues on some terminals)
+    #[arg(long)]
+    no_mouse: bool,
 }
 
 #[derive(Subcommand)]
@@ -152,6 +156,11 @@ fn main() -> anyhow::Result<()> {
                 config.bindings.insert(ch, cmd.to_string());
             }
         }
+    }
+
+    // --no-mouse CLI flag overrides config
+    if cli.no_mouse {
+        config.display.mouse = false;
     }
 
     app::run(

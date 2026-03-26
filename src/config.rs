@@ -38,6 +38,7 @@ pub struct KeyConfig {
 pub struct DisplayConfig {
     pub poll_interval_ms: u64,
     pub border_style: String,
+    pub mouse: bool,
 }
 
 impl Default for KeyConfig {
@@ -60,6 +61,7 @@ impl Default for DisplayConfig {
         Self {
             poll_interval_ms: 150,
             border_style: "rounded".into(),
+            mouse: true,
         }
     }
 }
