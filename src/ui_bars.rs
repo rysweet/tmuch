@@ -18,40 +18,52 @@ const TAB_DARK_BLUE: Color = Color::Rgb(30, 30, 80);
 const TAB_DARK_MAGENTA: Color = Color::Rgb(80, 30, 80);
 const TAB_DARK_YELLOW: Color = Color::Rgb(80, 80, 30);
 
-/// Render a hint as a styled tab with colored background.
-fn hint_tab(key: &str, label: &str, bg: Color) -> Vec<Span<'static>> {
+const TAB_SELECTED_BG: Color = Color::Rgb(255, 255, 255);
+const TAB_SELECTED_FG: Color = Color::Rgb(0, 0, 0);
+
+/// Render a hint tab. If `selected`, render with bright inverted colors.
+fn hint_tab(key: &str, label: &str, bg: Color, selected: bool) -> Vec<Span<'static>> {
+    let style = if selected {
+        Style::default()
+            .fg(TAB_SELECTED_FG)
+            .bg(TAB_SELECTED_BG)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default()
+            .fg(TAB_FG)
+            .bg(bg)
+            .add_modifier(Modifier::BOLD)
+    };
     vec![
-        Span::styled(
-            format!(" {} {} ", key, label),
-            Style::default()
-                .fg(TAB_FG)
-                .bg(bg)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::raw(" "), // gap between tabs
+        Span::styled(format!(" {} {} ", key, label), style),
+        Span::raw(" "),
     ]
 }
 
+/// Number of hint tabs in Normal mode.
+pub const NORMAL_HINT_COUNT: usize = 12;
+
 pub fn draw_hints_bar(frame: &mut Frame, app: &App, area: Rect) {
     let mut spans = vec![Span::raw(" ")];
+    let sel = app.selected_hint;
 
     match app.mode {
         Mode::Normal => {
-            spans.extend(hint_tab("q", "Quit", TAB_DARK_RED));
-            spans.extend(hint_tab("^A", "Add", TAB_DARK_GREEN));
-            spans.extend(hint_tab("^D", "Drop", TAB_DARK_RED));
-            spans.extend(hint_tab("^S", "Sessions", TAB_DARK_CYAN));
-            spans.extend(hint_tab("^G", "Azlin", TAB_DARK_BLUE));
-            spans.extend(hint_tab("^E", "Settings", TAB_DARK_MAGENTA));
-            spans.extend(hint_tab("^N", "Apps", TAB_DARK_CYAN));
-            spans.extend(hint_tab("Tab", "Next", TAB_DARK_YELLOW));
-            spans.extend(hint_tab("Enter", "Focus", TAB_DARK_GREEN));
-            spans.extend(hint_tab("^V/^H", "Split", TAB_DARK_CYAN));
-            spans.extend(hint_tab("F11", "Max", TAB_DARK_YELLOW));
-            spans.extend(hint_tab("1-9", "Bindings", TAB_DARK_MAGENTA));
+            spans.extend(hint_tab("q", "Quit", TAB_DARK_RED, sel == 0));
+            spans.extend(hint_tab("^A", "Add", TAB_DARK_GREEN, sel == 1));
+            spans.extend(hint_tab("^D", "Drop", TAB_DARK_RED, sel == 2));
+            spans.extend(hint_tab("^S", "Sessions", TAB_DARK_CYAN, sel == 3));
+            spans.extend(hint_tab("^G", "Azlin", TAB_DARK_BLUE, sel == 4));
+            spans.extend(hint_tab("^E", "Settings", TAB_DARK_MAGENTA, sel == 5));
+            spans.extend(hint_tab("^N", "Apps", TAB_DARK_CYAN, sel == 6));
+            spans.extend(hint_tab("Tab", "Next", TAB_DARK_YELLOW, sel == 7));
+            spans.extend(hint_tab("Enter", "Focus", TAB_DARK_GREEN, sel == 8));
+            spans.extend(hint_tab("^V/^H", "Split", TAB_DARK_CYAN, sel == 9));
+            spans.extend(hint_tab("F11", "Max", TAB_DARK_YELLOW, sel == 10));
+            spans.extend(hint_tab("1-9", "Bindings", TAB_DARK_MAGENTA, sel == 11));
         }
         Mode::PaneFocused => {
-            spans.extend(hint_tab("Esc", "Unfocus", TAB_DARK_RED));
+            spans.extend(hint_tab("Esc", "Unfocus", TAB_DARK_RED, false));
             spans.push(Span::raw(" "));
             spans.push(Span::styled(
                 "All keys forwarded to session",
@@ -59,29 +71,34 @@ pub fn draw_hints_bar(frame: &mut Frame, app: &App, area: Rect) {
             ));
         }
         Mode::SessionPicker => {
-            spans.extend(hint_tab("\u{2191}\u{2193}/jk", "Nav", TAB_DARK_YELLOW));
-            spans.extend(hint_tab("Enter", "Select", TAB_DARK_GREEN));
-            spans.extend(hint_tab("a", "Add All", TAB_DARK_CYAN));
-            spans.extend(hint_tab("z", "Scan Azlin", TAB_DARK_BLUE));
-            spans.extend(hint_tab("Esc", "Cancel", TAB_DARK_RED));
+            spans.extend(hint_tab(
+                "\u{2191}\u{2193}/jk",
+                "Nav",
+                TAB_DARK_YELLOW,
+                false,
+            ));
+            spans.extend(hint_tab("Enter", "Select", TAB_DARK_GREEN, false));
+            spans.extend(hint_tab("a", "Add All", TAB_DARK_CYAN, false));
+            spans.extend(hint_tab("z", "Scan Azlin", TAB_DARK_BLUE, false));
+            spans.extend(hint_tab("Esc", "Cancel", TAB_DARK_RED, false));
         }
         Mode::CommandEditor => {
             let input_mode = app.editor_input_mode();
             match input_mode {
                 EditorInputMode::Browse => {
-                    spans.extend(hint_tab("\u{2191}\u{2193}", "Nav", TAB_DARK_YELLOW));
-                    spans.extend(hint_tab("a", "Add", TAB_DARK_GREEN));
-                    spans.extend(hint_tab("e/Enter", "Edit", TAB_DARK_CYAN));
-                    spans.extend(hint_tab("d", "Delete", TAB_DARK_RED));
-                    spans.extend(hint_tab("Esc", "Close", TAB_DARK_RED));
+                    spans.extend(hint_tab("\u{2191}\u{2193}", "Nav", TAB_DARK_YELLOW, false));
+                    spans.extend(hint_tab("a", "Add", TAB_DARK_GREEN, false));
+                    spans.extend(hint_tab("e/Enter", "Edit", TAB_DARK_CYAN, false));
+                    spans.extend(hint_tab("d", "Delete", TAB_DARK_RED, false));
+                    spans.extend(hint_tab("Esc", "Close", TAB_DARK_RED, false));
                 }
                 EditorInputMode::InputKey => {
-                    spans.extend(hint_tab("0-9", "Press a key", TAB_DARK_GREEN));
-                    spans.extend(hint_tab("Esc", "Cancel", TAB_DARK_RED));
+                    spans.extend(hint_tab("0-9", "Press a key", TAB_DARK_GREEN, false));
+                    spans.extend(hint_tab("Esc", "Cancel", TAB_DARK_RED, false));
                 }
                 EditorInputMode::InputCommand => {
-                    spans.extend(hint_tab("Enter", "Save", TAB_DARK_GREEN));
-                    spans.extend(hint_tab("Esc", "Cancel", TAB_DARK_RED));
+                    spans.extend(hint_tab("Enter", "Save", TAB_DARK_GREEN, false));
+                    spans.extend(hint_tab("Esc", "Cancel", TAB_DARK_RED, false));
                     spans.push(Span::raw(" "));
                     spans.push(Span::styled(
                         "Type command...",
@@ -91,9 +108,14 @@ pub fn draw_hints_bar(frame: &mut Frame, app: &App, area: Rect) {
             }
         }
         Mode::AppLauncher => {
-            spans.extend(hint_tab("\u{2191}\u{2193}/jk", "Nav", TAB_DARK_YELLOW));
-            spans.extend(hint_tab("Enter", "Launch", TAB_DARK_GREEN));
-            spans.extend(hint_tab("Esc", "Cancel", TAB_DARK_RED));
+            spans.extend(hint_tab(
+                "\u{2191}\u{2193}/jk",
+                "Nav",
+                TAB_DARK_YELLOW,
+                false,
+            ));
+            spans.extend(hint_tab("Enter", "Launch", TAB_DARK_GREEN, false));
+            spans.extend(hint_tab("Esc", "Cancel", TAB_DARK_RED, false));
         }
     }
 

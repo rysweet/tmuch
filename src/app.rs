@@ -27,6 +27,8 @@ pub struct App {
     pub busy: Option<String>,
     /// Spinner frame counter
     pub spinner_tick: usize,
+    /// Currently highlighted menu tab index (for keyboard navigation)
+    pub selected_hint: usize,
 }
 
 impl App {
@@ -46,6 +48,7 @@ impl App {
             drag_state: None,
             busy: None,
             spinner_tick: 0,
+            selected_hint: 0,
         }
     }
 

@@ -25,6 +25,12 @@ pub fn debug_log(msg: &str) {
     }
 }
 
+/// Get the most recent log message (for inline display).
+pub fn last_message() -> Option<String> {
+    let buf = global_buffer();
+    buf.lock().ok()?.back().cloned()
+}
+
 /// Convenience macro-style helper: formats and logs.
 #[macro_export]
 macro_rules! dlog {
