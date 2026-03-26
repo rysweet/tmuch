@@ -10,15 +10,25 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
-fn sep() -> Span<'static> {
-    Span::styled(" \u{2502} ", Style::default().fg(Color::Rgb(50, 50, 50)))
-}
+const TAB_FG: Color = Color::Rgb(220, 220, 220);
+const TAB_DARK_RED: Color = Color::Rgb(80, 30, 30);
+const TAB_DARK_GREEN: Color = Color::Rgb(30, 80, 30);
+const TAB_DARK_CYAN: Color = Color::Rgb(30, 80, 80);
+const TAB_DARK_BLUE: Color = Color::Rgb(30, 30, 80);
+const TAB_DARK_MAGENTA: Color = Color::Rgb(80, 30, 80);
+const TAB_DARK_YELLOW: Color = Color::Rgb(80, 80, 30);
 
-/// Each hotkey group gets a distinct color so they're easy to scan visually.
-fn hint(key: &'static str, label: &'static str, color: Color) -> Vec<Span<'static>> {
+/// Render a hint as a styled tab with colored background.
+fn hint_tab(key: &str, label: &str, bg: Color) -> Vec<Span<'static>> {
     vec![
-        Span::styled(key, Style::default().fg(color).add_modifier(Modifier::BOLD)),
-        Span::styled(label, Style::default().fg(Color::Rgb(120, 120, 120))),
+        Span::styled(
+            format!(" {} {} ", key, label),
+            Style::default()
+                .fg(TAB_FG)
+                .bg(bg)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(" "), // gap between tabs
     ]
 }
 
@@ -27,73 +37,52 @@ pub fn draw_hints_bar(frame: &mut Frame, app: &App, area: Rect) {
 
     match app.mode {
         Mode::Normal => {
-            spans.extend(hint("q", " Quit", Color::Red));
-            spans.push(sep());
-            spans.extend(hint("^A", " Add", Color::Green));
-            spans.push(sep());
-            spans.extend(hint("^D", " Drop", Color::Red));
-            spans.push(sep());
-            spans.extend(hint("^S", " Sessions", Color::Cyan));
-            spans.push(sep());
-            spans.extend(hint("^G", " Azlin", Color::Blue));
-            spans.push(sep());
-            spans.extend(hint("^E", " Edit Cmds", Color::Magenta));
-            spans.push(sep());
-            spans.extend(hint("Tab", " Next", Color::Yellow));
-            spans.push(sep());
-            spans.extend(hint("Enter", " Focus", Color::Green));
-            spans.push(sep());
-            spans.extend(hint("^V/^H", " Split", Color::Cyan));
-            spans.push(sep());
-            spans.extend(hint("F11", " Max", Color::Yellow));
-            spans.push(sep());
-            spans.extend(hint("^N", " Apps", Color::LightCyan));
-            spans.push(sep());
-            spans.extend(hint("1-9", " Bindings", Color::Magenta));
+            spans.extend(hint_tab("q", "Quit", TAB_DARK_RED));
+            spans.extend(hint_tab("^A", "Add", TAB_DARK_GREEN));
+            spans.extend(hint_tab("^D", "Drop", TAB_DARK_RED));
+            spans.extend(hint_tab("^S", "Sessions", TAB_DARK_CYAN));
+            spans.extend(hint_tab("^G", "Azlin", TAB_DARK_BLUE));
+            spans.extend(hint_tab("^E", "Settings", TAB_DARK_MAGENTA));
+            spans.extend(hint_tab("^N", "Apps", TAB_DARK_CYAN));
+            spans.extend(hint_tab("Tab", "Next", TAB_DARK_YELLOW));
+            spans.extend(hint_tab("Enter", "Focus", TAB_DARK_GREEN));
+            spans.extend(hint_tab("^V/^H", "Split", TAB_DARK_CYAN));
+            spans.extend(hint_tab("F11", "Max", TAB_DARK_YELLOW));
+            spans.extend(hint_tab("1-9", "Bindings", TAB_DARK_MAGENTA));
         }
         Mode::PaneFocused => {
-            spans.extend(hint("Esc", " Unfocus", Color::Red));
-            spans.push(sep());
+            spans.extend(hint_tab("Esc", "Unfocus", TAB_DARK_RED));
+            spans.push(Span::raw(" "));
             spans.push(Span::styled(
                 "All keys forwarded to session",
                 Style::default().fg(Color::Rgb(100, 100, 100)),
             ));
         }
         Mode::SessionPicker => {
-            spans.extend(hint("\u{2191}\u{2193}/jk", " Nav", Color::Yellow));
-            spans.push(sep());
-            spans.extend(hint("Enter", " Select", Color::Green));
-            spans.push(sep());
-            spans.extend(hint("a", " Add All", Color::Cyan));
-            spans.push(sep());
-            spans.extend(hint("z", " Scan Azlin", Color::Blue));
-            spans.push(sep());
-            spans.extend(hint("Esc", " Cancel", Color::Red));
+            spans.extend(hint_tab("\u{2191}\u{2193}/jk", "Nav", TAB_DARK_YELLOW));
+            spans.extend(hint_tab("Enter", "Select", TAB_DARK_GREEN));
+            spans.extend(hint_tab("a", "Add All", TAB_DARK_CYAN));
+            spans.extend(hint_tab("z", "Scan Azlin", TAB_DARK_BLUE));
+            spans.extend(hint_tab("Esc", "Cancel", TAB_DARK_RED));
         }
         Mode::CommandEditor => {
             let input_mode = app.editor_input_mode();
             match input_mode {
                 EditorInputMode::Browse => {
-                    spans.extend(hint("\u{2191}\u{2193}", " Nav", Color::Yellow));
-                    spans.push(sep());
-                    spans.extend(hint("a", " Add", Color::Green));
-                    spans.push(sep());
-                    spans.extend(hint("e/Enter", " Edit", Color::Cyan));
-                    spans.push(sep());
-                    spans.extend(hint("d", " Delete", Color::Red));
-                    spans.push(sep());
-                    spans.extend(hint("Esc", " Close", Color::Red));
+                    spans.extend(hint_tab("\u{2191}\u{2193}", "Nav", TAB_DARK_YELLOW));
+                    spans.extend(hint_tab("a", "Add", TAB_DARK_GREEN));
+                    spans.extend(hint_tab("e/Enter", "Edit", TAB_DARK_CYAN));
+                    spans.extend(hint_tab("d", "Delete", TAB_DARK_RED));
+                    spans.extend(hint_tab("Esc", "Close", TAB_DARK_RED));
                 }
                 EditorInputMode::InputKey => {
-                    spans.extend(hint("0-9", " Press a key", Color::Green));
-                    spans.push(sep());
-                    spans.extend(hint("Esc", " Cancel", Color::Red));
+                    spans.extend(hint_tab("0-9", "Press a key", TAB_DARK_GREEN));
+                    spans.extend(hint_tab("Esc", "Cancel", TAB_DARK_RED));
                 }
                 EditorInputMode::InputCommand => {
-                    spans.extend(hint("Enter", " Save", Color::Green));
-                    spans.push(sep());
-                    spans.extend(hint("Esc", " Cancel", Color::Red));
-                    spans.push(sep());
+                    spans.extend(hint_tab("Enter", "Save", TAB_DARK_GREEN));
+                    spans.extend(hint_tab("Esc", "Cancel", TAB_DARK_RED));
+                    spans.push(Span::raw(" "));
                     spans.push(Span::styled(
                         "Type command...",
                         Style::default().fg(Color::Rgb(80, 80, 80)),
@@ -102,11 +91,9 @@ pub fn draw_hints_bar(frame: &mut Frame, app: &App, area: Rect) {
             }
         }
         Mode::AppLauncher => {
-            spans.extend(hint("\u{2191}\u{2193}/jk", " Nav", Color::Yellow));
-            spans.push(sep());
-            spans.extend(hint("Enter", " Launch", Color::Green));
-            spans.push(sep());
-            spans.extend(hint("Esc", " Cancel", Color::Red));
+            spans.extend(hint_tab("\u{2191}\u{2193}/jk", "Nav", TAB_DARK_YELLOW));
+            spans.extend(hint_tab("Enter", "Launch", TAB_DARK_GREEN));
+            spans.extend(hint_tab("Esc", "Cancel", TAB_DARK_RED));
         }
     }
 
