@@ -1136,7 +1136,7 @@ dependencies = [
 
 [[package]]
 name = "tmuch"
-version = "0.3.1"
+version = "0.3.7"
 dependencies = [
  "ansi-to-tui",
  "anyhow",

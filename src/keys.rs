@@ -1,6 +1,5 @@
 use crate::app::EditorInputMode;
 use crate::config::Config;
-use crate::layout::PaneId;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -43,8 +42,6 @@ pub enum Action {
     EditorBackspace,
     EditorConfirm,
     EditorCancelInput,
-    #[allow(dead_code)]
-    FocusPane(PaneId),
     SplitVertical,
     SplitHorizontal,
     ToggleMaximize,

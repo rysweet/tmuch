@@ -17,7 +17,6 @@ pub struct Config {
     pub azlin: AzlinConfig,
     /// Optional path to a theme file; None uses default (~/.config/tmuch/theme.toml).
     #[serde(default)]
-    #[allow(dead_code)]
     pub theme: Option<String>,
 }
 
@@ -200,5 +199,23 @@ pub fn validate_warnings(config: &Config) {
                  (~/.ssh/azlin_key, ~/.ssh/id_rsa, ~/.ssh/id_ed25519).\x1b[0m"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_default_config() {
+        let config = Config::default();
+        assert!(config.bindings.is_empty());
+        assert_eq!(config.display.poll_interval_ms, 150);
+    }
+
+    #[test]
+    fn test_find_az_cli_returns_option() {
+        // Just verify it doesn't panic
+        let _ = find_az_cli();
     }
 }

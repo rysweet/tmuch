@@ -33,12 +33,23 @@ impl IpcServer {
     /// Returns the server handle and the receiver for the main event loop.
     pub fn start(tx: mpsc::Sender<IpcMessage>) -> Result<Self> {
         let pid = std::process::id();
-        let socket_path = PathBuf::from(format!("/tmp/tmuch-{}.sock", pid));
+        let socket_dir = std::env::var("XDG_RUNTIME_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from("/tmp"));
+        let socket_path = socket_dir.join(format!("tmuch-{}.sock", pid));
 
         // Remove stale socket
         let _ = std::fs::remove_file(&socket_path);
 
         let listener = UnixListener::bind(&socket_path)?;
+
+        // Restrict socket permissions to owner only
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&socket_path, std::fs::Permissions::from_mode(0o600))?;
+        }
+
         listener.set_nonblocking(false)?;
 
         let path_clone = socket_path.clone();
@@ -91,11 +102,6 @@ impl IpcServer {
         });
 
         Ok(Self { socket_path })
-    }
-
-    #[allow(dead_code)]
-    pub fn socket_path(&self) -> &PathBuf {
-        &self.socket_path
     }
 }
 
@@ -199,14 +205,28 @@ pub fn send_command(json: &str) -> Result<String> {
 }
 
 fn find_socket() -> Result<PathBuf> {
-    for entry in std::fs::read_dir("/tmp")? {
-        let entry = entry?;
-        let name = entry.file_name().to_string_lossy().to_string();
-        if name.starts_with("tmuch-") && name.ends_with(".sock") {
-            return Ok(entry.path());
+    // Search XDG_RUNTIME_DIR first, then fall back to /tmp
+    let dirs_to_search: Vec<PathBuf> = {
+        let mut dirs = Vec::new();
+        if let Ok(xdg) = std::env::var("XDG_RUNTIME_DIR") {
+            dirs.push(PathBuf::from(xdg));
+        }
+        dirs.push(PathBuf::from("/tmp"));
+        dirs
+    };
+
+    for dir in &dirs_to_search {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries {
+                let entry = entry?;
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name.starts_with("tmuch-") && name.ends_with(".sock") {
+                    return Ok(entry.path());
+                }
+            }
         }
     }
     Err(anyhow::anyhow!(
-        "no running tmuch instance found (no /tmp/tmuch-*.sock)"
+        "no running tmuch instance found (no tmuch-*.sock)"
     ))
 }

@@ -17,7 +17,15 @@ fn layouts_dir() -> PathBuf {
         .join("layouts")
 }
 
+fn validate_layout_name(name: &str) -> Result<()> {
+    if name.contains('/') || name.contains('\\') || name.contains("..") || name.is_empty() {
+        anyhow::bail!("Invalid layout name: must not contain path separators or '..'");
+    }
+    Ok(())
+}
+
 pub fn load(name: &str) -> Result<LayoutSpec> {
+    validate_layout_name(name)?;
     let path = layouts_dir().join(format!("{}.toml", name));
     let content = std::fs::read_to_string(&path)
         .with_context(|| format!("Layout '{}' not found at {}", name, path.display()))?;
@@ -25,6 +33,7 @@ pub fn load(name: &str) -> Result<LayoutSpec> {
 }
 
 pub fn save(spec: &LayoutSpec) -> Result<()> {
+    validate_layout_name(&spec.name)?;
     let dir = layouts_dir();
     std::fs::create_dir_all(&dir)?;
     let path = dir.join(format!("{}.toml", spec.name));
@@ -46,4 +55,48 @@ pub fn list() -> Vec<String> {
             name.strip_suffix(".toml").map(|s| s.to_string())
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_layout_name_valid() {
+        assert!(validate_layout_name("my-layout").is_ok());
+        assert!(validate_layout_name("layout_2").is_ok());
+    }
+
+    #[test]
+    fn test_validate_layout_name_empty() {
+        assert!(validate_layout_name("").is_err());
+    }
+
+    #[test]
+    fn test_validate_layout_name_slash() {
+        assert!(validate_layout_name("../etc/passwd").is_err());
+        assert!(validate_layout_name("foo/bar").is_err());
+    }
+
+    #[test]
+    fn test_validate_layout_name_backslash() {
+        assert!(validate_layout_name("foo\\bar").is_err());
+    }
+
+    #[test]
+    fn test_validate_layout_name_dotdot() {
+        assert!(validate_layout_name("..").is_err());
+        assert!(validate_layout_name("foo..bar").is_err());
+    }
+
+    #[test]
+    fn test_load_rejects_traversal() {
+        assert!(load("../../../etc/passwd").is_err());
+    }
+
+    #[test]
+    fn test_list_returns_vec() {
+        // Just verify it doesn't panic
+        let _ = list();
+    }
 }

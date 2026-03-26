@@ -209,23 +209,6 @@ impl PaneManager {
             .collect()
     }
 
-    /// Iterate over (PaneId, &mut Pane) in layout order.
-    #[allow(dead_code)]
-    pub fn panes_mut(&mut self) -> Vec<(PaneId, &mut Pane)> {
-        let ids = self.pane_ids_in_order();
-        // We need to collect mutable refs safely
-        let mut result = Vec::with_capacity(ids.len());
-        for id in ids {
-            if let Some(pane) = self.panes.get_mut(&id) {
-                // SAFETY: Each id is unique, so we get disjoint mutable borrows.
-                // We use unsafe to bypass the borrow checker limitation with HashMap.
-                let pane_ptr = pane as *mut Pane;
-                result.push((id, unsafe { &mut *pane_ptr }));
-            }
-        }
-        result
-    }
-
     /// Get a pane by ID.
     pub fn get(&self, id: PaneId) -> Option<&Pane> {
         self.panes.get(&id)
@@ -313,5 +296,183 @@ impl PaneManager {
             ids
         };
         self.layout = LayoutNode::auto_grid(&ids);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::source::{ContentSource, PaneSpec};
+    use anyhow::Result;
+
+    struct MockSource {
+        name: String,
+    }
+
+    impl ContentSource for MockSource {
+        fn capture(&mut self, _w: u16, _h: u16) -> Result<String> {
+            Ok("mock".into())
+        }
+        fn send_keys(&mut self, _keys: &str) -> Result<()> {
+            Ok(())
+        }
+        fn name(&self) -> &str {
+            &self.name
+        }
+        fn source_label(&self) -> &str {
+            "mock"
+        }
+        fn is_interactive(&self) -> bool {
+            false
+        }
+        fn to_spec(&self) -> PaneSpec {
+            PaneSpec::Command {
+                command: "mock".into(),
+                interval_ms: 1000,
+            }
+        }
+    }
+
+    fn mock(name: &str) -> Box<dyn ContentSource> {
+        Box::new(MockSource {
+            name: name.to_string(),
+        })
+    }
+
+    #[test]
+    fn test_add_pane() {
+        let mut mgr = PaneManager::new();
+        let id = mgr.add(mock("a"));
+        assert_eq!(mgr.count(), 1);
+        assert_eq!(mgr.focused_id(), id);
+    }
+
+    #[test]
+    fn test_remove_focused() {
+        let mut mgr = PaneManager::new();
+        mgr.add(mock("a"));
+        mgr.add(mock("b"));
+        assert_eq!(mgr.count(), 2);
+        mgr.remove_focused();
+        assert_eq!(mgr.count(), 1);
+    }
+
+    #[test]
+    fn test_focus_next_cycle() {
+        let mut mgr = PaneManager::new();
+        let id0 = mgr.add(mock("a"));
+        let id1 = mgr.add(mock("b"));
+        // After adding b, focus is on b (id1)
+        mgr.focus_id(id0);
+        assert_eq!(mgr.focused_id(), id0);
+        mgr.focus_next();
+        assert_eq!(mgr.focused_id(), id1);
+        mgr.focus_next();
+        assert_eq!(mgr.focused_id(), id0); // wraps
+    }
+
+    #[test]
+    fn test_focus_prev_cycle() {
+        let mut mgr = PaneManager::new();
+        let id0 = mgr.add(mock("a"));
+        let id1 = mgr.add(mock("b"));
+        mgr.focus_id(id0);
+        mgr.focus_prev();
+        assert_eq!(mgr.focused_id(), id1); // wraps
+    }
+
+    #[test]
+    fn test_empty_focus() {
+        let mut mgr = PaneManager::new();
+        mgr.focus_next(); // should not panic
+        mgr.focus_prev(); // should not panic
+        assert!(mgr.focused().is_none());
+    }
+
+    #[test]
+    fn test_maximize_toggle() {
+        let mut mgr = PaneManager::new();
+        let id = mgr.add(mock("a"));
+        assert!(mgr.maximized.is_none());
+        mgr.toggle_maximize();
+        assert_eq!(mgr.maximized, Some(id));
+        mgr.toggle_maximize();
+        assert!(mgr.maximized.is_none());
+    }
+
+    #[test]
+    fn test_pane_name_and_label() {
+        let mut mgr = PaneManager::new();
+        let id = mgr.add(mock("test-pane"));
+        let pane = mgr.get(id).unwrap();
+        assert_eq!(pane.name(), "test-pane");
+        assert_eq!(pane.source_label(), "mock");
+        assert!(!pane.is_interactive());
+    }
+
+    #[test]
+    fn test_get_mut() {
+        let mut mgr = PaneManager::new();
+        let id = mgr.add(mock("a"));
+        assert!(mgr.get_mut(id).is_some());
+        assert!(mgr.get_mut(999).is_none());
+    }
+
+    #[test]
+    fn test_focus_id_invalid() {
+        let mut mgr = PaneManager::new();
+        let id = mgr.add(mock("a"));
+        mgr.focus_id(999); // should not change focus
+        assert_eq!(mgr.focused_id(), id);
+    }
+
+    #[test]
+    fn test_pane_ids_in_order() {
+        let mut mgr = PaneManager::new();
+        mgr.add(mock("a"));
+        mgr.add(mock("b"));
+        mgr.add(mock("c"));
+        let ids = mgr.pane_ids_in_order();
+        assert_eq!(ids.len(), 3);
+    }
+
+    #[test]
+    fn test_remove_clears_maximized() {
+        let mut mgr = PaneManager::new();
+        let id = mgr.add(mock("a"));
+        mgr.toggle_maximize();
+        assert_eq!(mgr.maximized, Some(id));
+        mgr.remove(id);
+        assert!(mgr.maximized.is_none());
+    }
+
+    #[test]
+    fn test_panes_iter() {
+        let mut mgr = PaneManager::new();
+        mgr.add(mock("a"));
+        mgr.add(mock("b"));
+        let panes = mgr.panes();
+        assert_eq!(panes.len(), 2);
+    }
+
+    #[test]
+    fn test_split_focused() {
+        let mut mgr = PaneManager::new();
+        mgr.add(mock("a"));
+        let new_id = mgr
+            .split_focused(SplitDirection::Vertical, mock("b"))
+            .unwrap();
+        assert_eq!(mgr.count(), 2);
+        assert_eq!(mgr.focused_id(), new_id);
+    }
+
+    #[test]
+    fn test_swap_focused_with_next() {
+        let mut mgr = PaneManager::new();
+        let id0 = mgr.add(mock("a"));
+        mgr.add(mock("b"));
+        mgr.focus_id(id0);
+        mgr.swap_focused_with_next(); // should not panic
+        assert_eq!(mgr.count(), 2);
     }
 }

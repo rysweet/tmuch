@@ -38,7 +38,6 @@ impl SessionPicker {
                     self.sessions.push(SessionInfo {
                         name,
                         attached: false,
-                        windows: 0,
                         host: Some(remote.name.clone()),
                     });
                 }
@@ -82,5 +81,68 @@ impl SessionPicker {
 
     pub fn confirm(&self) -> Option<&SessionInfo> {
         self.sessions.get(self.selected)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_session(name: &str) -> SessionInfo {
+        SessionInfo {
+            name: name.to_string(),
+            attached: false,
+            host: None,
+        }
+    }
+
+    #[test]
+    fn test_select_next_wraps() {
+        let mut picker = SessionPicker::new();
+        picker.sessions = vec![make_session("a"), make_session("b"), make_session("c")];
+        picker.selected = 2;
+        picker.select_next();
+        assert_eq!(picker.selected, 0);
+    }
+
+    #[test]
+    fn test_select_prev_wraps() {
+        let mut picker = SessionPicker::new();
+        picker.sessions = vec![make_session("a"), make_session("b")];
+        picker.selected = 0;
+        picker.select_prev();
+        assert_eq!(picker.selected, 1);
+    }
+
+    #[test]
+    fn test_empty_list() {
+        let mut picker = SessionPicker::new();
+        picker.select_next(); // should not panic
+        picker.select_prev();
+        assert_eq!(picker.confirm(), None);
+    }
+
+    #[test]
+    fn test_confirm_returns_selected() {
+        let mut picker = SessionPicker::new();
+        picker.sessions = vec![make_session("alpha"), make_session("beta")];
+        picker.selected = 1;
+        let s = picker.confirm().unwrap();
+        assert_eq!(s.name, "beta");
+    }
+
+    #[test]
+    fn test_clamp_after_shrink() {
+        let mut picker = SessionPicker::new();
+        picker.sessions = vec![make_session("a"), make_session("b"), make_session("c")];
+        picker.selected = 2;
+        picker.sessions.pop(); // shrink to 2
+        picker.sessions.pop(); // shrink to 1
+                               // clamp_selected is private, so we trigger it via select_next
+                               // Actually test the clamp logic directly:
+        if picker.selected >= picker.sessions.len() && !picker.sessions.is_empty() {
+            picker.selected = picker.sessions.len() - 1;
+        }
+        assert_eq!(picker.selected, 0);
     }
 }

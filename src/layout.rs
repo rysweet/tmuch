@@ -336,21 +336,20 @@ fn split_rect(area: Rect, dir: SplitDirection, ratio: f32) -> (Rect, Rect) {
     }
 }
 
-/// Compatibility wrapper: compute a grid layout for `n` panes within `area`.
-/// Returns one Rect per pane (same order as old API).
-#[allow(dead_code)]
-pub fn compute(n: usize, area: Rect) -> Vec<Rect> {
-    if n == 0 {
-        return Vec::new();
-    }
-    let ids: Vec<PaneId> = (0..n as PaneId).collect();
-    let tree = LayoutNode::auto_grid(&ids).unwrap();
-    tree.resolve(area).into_iter().map(|(_, r)| r).collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Compatibility wrapper: compute a grid layout for `n` panes within `area`.
+    /// Returns one Rect per pane (same order as old API).
+    fn compute(n: usize, area: Rect) -> Vec<Rect> {
+        if n == 0 {
+            return Vec::new();
+        }
+        let ids: Vec<PaneId> = (0..n as PaneId).collect();
+        let tree = LayoutNode::auto_grid(&ids).unwrap();
+        tree.resolve(area).into_iter().map(|(_, r)| r).collect()
+    }
 
     #[test]
     fn test_zero_panes() {

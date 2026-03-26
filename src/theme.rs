@@ -167,3 +167,81 @@ pub fn parse_border_type(s: &str) -> BorderType {
         _ => BorderType::Rounded,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_color_hex() {
+        assert_eq!(parse_color("#ff0000"), Color::Rgb(255, 0, 0));
+    }
+
+    #[test]
+    fn test_parse_color_named_red() {
+        assert_eq!(parse_color("red"), Color::Red);
+    }
+
+    #[test]
+    fn test_parse_color_named_cyan() {
+        assert_eq!(parse_color("cyan"), Color::Cyan);
+    }
+
+    #[test]
+    fn test_parse_color_invalid_returns_white() {
+        assert_eq!(parse_color("notacolor"), Color::White);
+    }
+
+    #[test]
+    fn test_parse_border_type_rounded() {
+        assert_eq!(parse_border_type("rounded"), BorderType::Rounded);
+    }
+
+    #[test]
+    fn test_parse_border_type_unknown_returns_rounded() {
+        assert_eq!(parse_border_type("wavy"), BorderType::Rounded);
+    }
+
+    #[test]
+    fn test_default_theme_loads() {
+        let theme = Theme::default();
+        assert_eq!(theme.border.focused, "yellow");
+        assert_eq!(theme.status_bar.bg, "black");
+    }
+
+    #[test]
+    fn test_parse_color_hex_green() {
+        assert_eq!(parse_color("#00ff00"), Color::Rgb(0, 255, 0));
+    }
+
+    #[test]
+    fn test_parse_color_darkgray() {
+        assert_eq!(parse_color("darkgray"), Color::DarkGray);
+    }
+
+    #[test]
+    fn test_parse_border_type_plain() {
+        assert_eq!(parse_border_type("plain"), BorderType::Plain);
+    }
+
+    #[test]
+    fn test_parse_border_type_double() {
+        assert_eq!(parse_border_type("double"), BorderType::Double);
+    }
+
+    #[test]
+    fn test_parse_border_type_thick() {
+        assert_eq!(parse_border_type("thick"), BorderType::Thick);
+    }
+
+    #[test]
+    fn test_parse_color_with_whitespace() {
+        assert_eq!(parse_color("  red  "), Color::Red);
+    }
+
+    #[test]
+    fn test_theme_load_returns_default_when_no_file() {
+        // Theme::load() should not panic even if file doesn't exist
+        let _theme = Theme::load();
+    }
+}
