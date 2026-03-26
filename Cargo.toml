@@ -16,14 +16,8 @@ serde = { version = "1", features = ["derive"] }
 anyhow = "1"
 serde_json = "1"
 dirs = "6"
-tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "process"] }
 shellexpand = "3"
 libc = "0.2"
 
-# SSH via azlin-ssh (reuses production SSH pool, client, key management)
-# Uses git dep for CI; local dev can override with:
-#   [patch.'https://github.com/rysweet/azlin']
-#   azlin-ssh = { path = "../azlin/rust/crates/azlin-ssh" }
-azlin-ssh = { git = "https://github.com/rysweet/azlin" }
+# Azure VM discovery (azlin-azure uses az CLI, no async needed)
 azlin-azure = { git = "https://github.com/rysweet/azlin" }
-azlin-core = { git = "https://github.com/rysweet/azlin" }

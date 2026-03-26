@@ -36,3 +36,6 @@ logs/
 outputs/
 .claude/runtime/
 .claude/settings.json
+
+# Amplihack runtime directories (auto-generated)
+.claude/logs/

@@ -9,6 +9,31 @@ use anyhow::Result;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+/// Configuration for a remote SSH host (from config.toml).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct RemoteConfig {
+    pub name: String,
+    pub host: String,
+    #[serde(default = "default_user")]
+    pub user: String,
+    #[serde(default)]
+    pub key: Option<String>,
+    #[serde(default = "default_port")]
+    pub port: u16,
+    #[serde(default = "default_poll")]
+    pub poll_interval_ms: u64,
+}
+
+fn default_user() -> String {
+    "azureuser".into()
+}
+fn default_port() -> u16 {
+    22
+}
+fn default_poll() -> u64 {
+    500
+}
+
 pub struct SshSubprocessSource {
     host: String,
     user: String,
@@ -138,6 +163,17 @@ fn shell_escape(s: &str) -> String {
     } else {
         format!("'{}'", s.replace('\'', "'\\''"))
     }
+}
+
+/// List tmux sessions on a remote host via SSH subprocess.
+pub fn list_remote_sessions(remote: &RemoteConfig) -> Result<Vec<String>> {
+    let cmd = "tmux list-sessions -F '#{session_name}' 2>/dev/null || true";
+    let output = run_ssh_command(&remote.host, &remote.user, remote.port, cmd)?;
+    Ok(output
+        .lines()
+        .filter(|l| !l.is_empty())
+        .map(|l| l.to_string())
+        .collect())
 }
 
 impl ContentSource for SshSubprocessSource {

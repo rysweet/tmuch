@@ -2,7 +2,6 @@ pub mod command;
 pub mod http;
 pub mod local_tmux;
 pub mod ssh_subprocess;
-pub mod ssh_tmux;
 pub mod tail;
 
 use anyhow::Result;

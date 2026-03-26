@@ -1,9 +1,7 @@
 use crate::azlin_integration::{self, AzlinConfig};
-use crate::source::ssh_tmux::RemoteConfig;
+use crate::source::ssh_subprocess::{self, RemoteConfig};
 use crate::tmux::{self, SessionInfo};
 use anyhow::Result;
-use azlin_ssh::SshPool;
-use std::sync::Arc;
 
 pub struct SessionPicker {
     pub sessions: Vec<SessionInfo>,
@@ -29,17 +27,13 @@ impl SessionPicker {
         &mut self,
         remotes: &[RemoteConfig],
         azlin_config: &AzlinConfig,
-        pool: &Arc<SshPool>,
-        rt: &tokio::runtime::Handle,
     ) -> Result<()> {
         // Local sessions first
         self.sessions = tmux::list_sessions()?;
 
-        // Configured remote hosts
+        // Configured remote hosts (via SSH subprocess)
         for remote in remotes {
-            let remote = remote.clone();
-            let result = rt.block_on(crate::source::ssh_tmux::list_remote_sessions(pool, &remote));
-            if let Ok(names) = result {
+            if let Ok(names) = ssh_subprocess::list_remote_sessions(remote) {
                 for name in names {
                     self.sessions.push(SessionInfo {
                         name,
@@ -53,11 +47,9 @@ impl SessionPicker {
 
         // Azlin VM discovery (if enabled)
         if azlin_config.enabled {
-            let result = rt.block_on(azlin_integration::discover_remote_sessions(
-                pool,
+            if let Ok(remote_sessions) = azlin_integration::discover_remote_sessions_sync(
                 azlin_config.resource_group.as_deref(),
-            ));
-            if let Ok(remote_sessions) = result {
+            ) {
                 self.sessions.extend(remote_sessions);
             }
         }
