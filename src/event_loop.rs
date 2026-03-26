@@ -100,6 +100,10 @@ pub fn run_azlin(resource_group: Option<String>) -> Result<()> {
     loop {
         capture_pane_content(&mut app, &terminal)?;
         app.spinner_tick = app.spinner_tick.wrapping_add(1);
+
+        // Check for background task completion
+        check_bg_result(&mut app);
+
         terminal.draw(|frame| ui::draw(frame, &app))?;
 
         if app.should_quit {
@@ -172,6 +176,7 @@ pub fn run(
     loop {
         capture_pane_content(&mut app, &terminal)?;
         app.spinner_tick = app.spinner_tick.wrapping_add(1);
+        check_bg_result(&mut app);
         terminal.draw(|frame| ui::draw(frame, &app))?;
 
         if app.should_quit {
@@ -223,6 +228,30 @@ pub fn run(
     Ok(())
 }
 
+/// Check if a background task has completed.
+fn check_bg_result(app: &mut App) {
+    let completed = if let Some(ref rx) = app.bg_result {
+        rx.try_recv().ok()
+    } else {
+        None
+    };
+
+    if let Some(result) = completed {
+        match result {
+            crate::app::BgTaskResult::AzlinSessions(sessions) => {
+                crate::dlog!(
+                    "Azlin discovery complete: {} sessions found",
+                    sessions.len()
+                );
+                app.picker.sessions = sessions;
+                app.busy = None;
+                app.bg_result = None;
+                app.mode = crate::keys::Mode::SessionPicker;
+            }
+        }
+    }
+}
+
 /// Capture content from all visible panes.
 fn capture_pane_content(
     app: &mut App,
@@ -271,6 +300,19 @@ fn handle_event(app: &mut App, ev: Event, main_area: Rect) -> Result<()> {
     match ev {
         Event::Key(key) => {
             crate::dlog!("key: {:?}", key);
+
+            // If busy, Esc cancels the background operation
+            if app.busy.is_some() {
+                if key.code == crossterm::event::KeyCode::Esc {
+                    crate::dlog!("Cancelling background operation");
+                    app.busy = None;
+                    app.bg_result = None;
+                    return Ok(());
+                }
+                // Ignore other keys while busy
+                return Ok(());
+            }
+
             if let Some(action) =
                 keys::handle(key, &app.mode, &app.config, &app.editor_input_mode())
             {
