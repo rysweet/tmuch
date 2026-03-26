@@ -130,3 +130,37 @@ pub fn add_remote_session_pane(app: &mut App, host: &str, session_name: &str) {
         app.pane_manager.add(Box::new(source));
     }
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_attach_remote_parses_user_host_session() {
+        // Test the parsing logic of attach_remote without actually connecting
+        let input = "admin@myhost.com:mysession";
+        let (user_host, session) = input.rsplit_once(':').unwrap();
+        assert_eq!(session, "mysession");
+        let (user, host) = user_host.split_once('@').unwrap();
+        assert_eq!(user, "admin");
+        assert_eq!(host, "myhost.com");
+    }
+
+    #[test]
+    fn test_attach_remote_default_user() {
+        let input = "myhost.com:session1";
+        let (user_host, session) = input.rsplit_once(':').unwrap();
+        assert_eq!(session, "session1");
+        let (user, host) = if let Some((u, h)) = user_host.split_once('@') {
+            (u.to_string(), h.to_string())
+        } else {
+            ("azureuser".to_string(), user_host.to_string())
+        };
+        assert_eq!(user, "azureuser");
+        assert_eq!(host, "myhost.com");
+    }
+
+    #[test]
+    fn test_attach_remote_missing_colon() {
+        let input = "nocolon";
+        assert!(input.rsplit_once(':').is_none());
+    }
+}

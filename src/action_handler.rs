@@ -253,7 +253,7 @@ pub fn handle_action(app: &mut App, action: Action) -> Result<()> {
     Ok(())
 }
 
-fn handle_new_pane_request(app: &mut App, request: NewPaneRequest) -> Result<()> {
+pub(crate) fn handle_new_pane_request(app: &mut App, request: NewPaneRequest) -> Result<()> {
     match request {
         NewPaneRequest::TmuxCommand { command } => {
             let _ = app.create_local_tmux(Some(&command));
@@ -304,4 +304,355 @@ fn handle_new_pane_request(app: &mut App, request: NewPaneRequest) -> Result<()>
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+    use crate::source::{ContentSource, PaneSpec};
+
+    struct MockSource(String);
+
+    impl ContentSource for MockSource {
+        fn capture(&mut self, _w: u16, _h: u16) -> anyhow::Result<String> {
+            Ok("mock".into())
+        }
+        fn send_keys(&mut self, _keys: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn name(&self) -> &str {
+            &self.0
+        }
+        fn source_label(&self) -> &str {
+            "mock"
+        }
+        fn is_interactive(&self) -> bool {
+            true
+        }
+        fn to_spec(&self) -> PaneSpec {
+            PaneSpec::Command {
+                command: "mock".into(),
+                interval_ms: 1000,
+            }
+        }
+    }
+
+    fn mock_app() -> App {
+        let mut app = App::new(Config::default());
+        app.pane_manager.add(Box::new(MockSource("a".into())));
+        app.pane_manager.add(Box::new(MockSource("b".into())));
+        app
+    }
+
+    #[test]
+    fn test_quit() {
+        let mut app = mock_app();
+        assert!(!app.should_quit);
+        handle_action(&mut app, Action::Quit).unwrap();
+        assert!(app.should_quit);
+    }
+
+    #[test]
+    fn test_drop_pane() {
+        let mut app = mock_app();
+        assert_eq!(app.pane_manager.count(), 2);
+        handle_action(&mut app, Action::DropPane).unwrap();
+        assert_eq!(app.pane_manager.count(), 1);
+    }
+
+    #[test]
+    fn test_focus_next_prev() {
+        let mut app = mock_app();
+        let ids = app.pane_manager.pane_ids_in_order();
+        app.pane_manager.focus_id(ids[0]);
+        let initial = app.pane_manager.focused_id();
+        handle_action(&mut app, Action::FocusNext).unwrap();
+        assert_ne!(app.pane_manager.focused_id(), initial);
+        handle_action(&mut app, Action::FocusPrev).unwrap();
+        assert_eq!(app.pane_manager.focused_id(), initial);
+    }
+
+    #[test]
+    fn test_enter_exit_pane_mode() {
+        let mut app = mock_app();
+        assert_eq!(app.mode, Mode::Normal);
+        handle_action(&mut app, Action::EnterPaneMode).unwrap();
+        assert_eq!(app.mode, Mode::PaneFocused);
+        handle_action(&mut app, Action::ExitPaneMode).unwrap();
+        assert_eq!(app.mode, Mode::Normal);
+    }
+
+    #[test]
+    fn test_enter_pane_mode_no_panes() {
+        let mut app = App::new(Config::default());
+        handle_action(&mut app, Action::EnterPaneMode).unwrap();
+        assert_eq!(app.mode, Mode::Normal);
+    }
+
+    #[test]
+    fn test_picker_cancel() {
+        let mut app = mock_app();
+        app.mode = Mode::SessionPicker;
+        handle_action(&mut app, Action::PickerCancel).unwrap();
+        assert_eq!(app.mode, Mode::Normal);
+    }
+
+    #[test]
+    fn test_picker_confirm_empty() {
+        let mut app = mock_app();
+        app.mode = Mode::SessionPicker;
+        handle_action(&mut app, Action::PickerConfirm).unwrap();
+        assert_eq!(app.mode, Mode::Normal);
+    }
+
+    #[test]
+    fn test_picker_up_down() {
+        let mut app = mock_app();
+        handle_action(&mut app, Action::PickerUp).unwrap();
+        handle_action(&mut app, Action::PickerDown).unwrap();
+    }
+
+    #[test]
+    fn test_send_keys() {
+        let mut app = mock_app();
+        handle_action(&mut app, Action::SendKeys("Enter".into())).unwrap();
+    }
+
+    #[test]
+    fn test_open_settings() {
+        let mut app = mock_app();
+        let count_before = app.pane_manager.count();
+        handle_action(&mut app, Action::OpenSettings).unwrap();
+        assert_eq!(app.pane_manager.count(), count_before + 1);
+    }
+
+    #[test]
+    fn test_editor_operations_no_editor() {
+        let mut app = mock_app();
+        handle_action(&mut app, Action::EditorUp).unwrap();
+        handle_action(&mut app, Action::EditorDown).unwrap();
+        handle_action(&mut app, Action::EditorDelete).unwrap();
+        handle_action(&mut app, Action::EditorAdd).unwrap();
+        handle_action(&mut app, Action::EditorEdit).unwrap();
+        handle_action(&mut app, Action::EditorSetKey('5')).unwrap();
+        handle_action(&mut app, Action::EditorTypeChar('x')).unwrap();
+        handle_action(&mut app, Action::EditorBackspace).unwrap();
+        handle_action(&mut app, Action::EditorConfirm).unwrap();
+        handle_action(&mut app, Action::EditorCancelInput).unwrap();
+    }
+
+    #[test]
+    fn test_editor_close() {
+        let mut app = mock_app();
+        app.mode = Mode::CommandEditor;
+        app.command_editor = Some(crate::editor_state::CommandEditorState {
+            entries: vec![],
+            selected: 0,
+            input_mode: crate::editor_state::EditorInputMode::Browse,
+            input_buffer: String::new(),
+            pending_key: None,
+        });
+        handle_action(&mut app, Action::EditorClose).unwrap();
+        assert_eq!(app.mode, Mode::Normal);
+        assert!(app.command_editor.is_none());
+    }
+
+    #[test]
+    fn test_editor_with_state() {
+        let mut app = mock_app();
+        app.command_editor = Some(crate::editor_state::CommandEditorState {
+            entries: vec![('1', "top".into()), ('2', "htop".into())],
+            selected: 0,
+            input_mode: crate::editor_state::EditorInputMode::Browse,
+            input_buffer: String::new(),
+            pending_key: None,
+        });
+        handle_action(&mut app, Action::EditorDown).unwrap();
+        assert_eq!(app.command_editor.as_ref().unwrap().selected, 1);
+        handle_action(&mut app, Action::EditorUp).unwrap();
+        assert_eq!(app.command_editor.as_ref().unwrap().selected, 0);
+
+        // Test add flow
+        handle_action(&mut app, Action::EditorAdd).unwrap();
+        assert_eq!(
+            app.command_editor.as_ref().unwrap().input_mode,
+            crate::editor_state::EditorInputMode::InputKey
+        );
+        handle_action(&mut app, Action::EditorSetKey('3')).unwrap();
+        assert_eq!(
+            app.command_editor.as_ref().unwrap().input_mode,
+            crate::editor_state::EditorInputMode::InputCommand
+        );
+        handle_action(&mut app, Action::EditorTypeChar('l')).unwrap();
+        handle_action(&mut app, Action::EditorTypeChar('s')).unwrap();
+        assert_eq!(app.command_editor.as_ref().unwrap().input_buffer, "ls");
+        handle_action(&mut app, Action::EditorBackspace).unwrap();
+        assert_eq!(app.command_editor.as_ref().unwrap().input_buffer, "l");
+        handle_action(&mut app, Action::EditorCancelInput).unwrap();
+        assert_eq!(
+            app.command_editor.as_ref().unwrap().input_mode,
+            crate::editor_state::EditorInputMode::Browse
+        );
+    }
+
+    #[test]
+    fn test_editor_edit_and_confirm() {
+        let mut app = mock_app();
+        app.command_editor = Some(crate::editor_state::CommandEditorState {
+            entries: vec![('1', "top".into())],
+            selected: 0,
+            input_mode: crate::editor_state::EditorInputMode::Browse,
+            input_buffer: String::new(),
+            pending_key: None,
+        });
+        handle_action(&mut app, Action::EditorEdit).unwrap();
+        assert_eq!(
+            app.command_editor.as_ref().unwrap().input_mode,
+            crate::editor_state::EditorInputMode::InputCommand
+        );
+        assert_eq!(app.command_editor.as_ref().unwrap().pending_key, Some('1'));
+        // Type new command
+        handle_action(&mut app, Action::EditorTypeChar('h')).unwrap();
+        handle_action(&mut app, Action::EditorTypeChar('t')).unwrap();
+        // Confirm saves
+        handle_action(&mut app, Action::EditorConfirm).unwrap();
+    }
+
+    #[test]
+    fn test_toggle_maximize() {
+        let mut app = mock_app();
+        assert!(app.pane_manager.maximized.is_none());
+        handle_action(&mut app, Action::ToggleMaximize).unwrap();
+        assert!(app.pane_manager.maximized.is_some());
+        handle_action(&mut app, Action::ToggleMaximize).unwrap();
+        assert!(app.pane_manager.maximized.is_none());
+    }
+
+    #[test]
+    fn test_swap_pane() {
+        let mut app = mock_app();
+        handle_action(&mut app, Action::SwapPane).unwrap();
+    }
+
+    #[test]
+    fn test_open_app_launcher() {
+        let mut app = mock_app();
+        handle_action(&mut app, Action::OpenAppLauncher).unwrap();
+        assert_eq!(app.mode, Mode::AppLauncher);
+        assert!(app.app_launcher.is_some());
+    }
+
+    #[test]
+    fn test_launcher_navigation_and_cancel() {
+        let mut app = mock_app();
+        handle_action(&mut app, Action::OpenAppLauncher).unwrap();
+        handle_action(&mut app, Action::LauncherDown).unwrap();
+        handle_action(&mut app, Action::LauncherUp).unwrap();
+        handle_action(&mut app, Action::LauncherCancel).unwrap();
+        assert_eq!(app.mode, Mode::Normal);
+        assert!(app.app_launcher.is_none());
+    }
+
+    #[test]
+    fn test_launcher_confirm() {
+        let mut app = mock_app();
+        handle_action(&mut app, Action::OpenAppLauncher).unwrap();
+        let count_before = app.pane_manager.count();
+        handle_action(&mut app, Action::LauncherConfirm).unwrap();
+        assert_eq!(app.mode, Mode::Normal);
+        assert!(app.pane_manager.count() >= count_before);
+    }
+
+    #[test]
+    fn test_handle_new_pane_request_clock() {
+        let mut app = mock_app();
+        let n = app.pane_manager.count();
+        handle_new_pane_request(&mut app, NewPaneRequest::Clock).unwrap();
+        assert_eq!(app.pane_manager.count(), n + 1);
+    }
+
+    #[test]
+    fn test_handle_new_pane_request_snake() {
+        let mut app = mock_app();
+        let n = app.pane_manager.count();
+        handle_new_pane_request(&mut app, NewPaneRequest::Snake).unwrap();
+        assert_eq!(app.pane_manager.count(), n + 1);
+    }
+
+    #[test]
+    fn test_handle_new_pane_request_command() {
+        let mut app = mock_app();
+        let n = app.pane_manager.count();
+        handle_new_pane_request(
+            &mut app,
+            NewPaneRequest::Command {
+                command: "echo hi".into(),
+                interval_ms: 5000,
+            },
+        )
+        .unwrap();
+        assert_eq!(app.pane_manager.count(), n + 1);
+    }
+
+    #[test]
+    fn test_handle_new_pane_request_http() {
+        let mut app = mock_app();
+        let n = app.pane_manager.count();
+        handle_new_pane_request(
+            &mut app,
+            NewPaneRequest::Http {
+                url: "http://localhost".into(),
+                interval_ms: 5000,
+            },
+        )
+        .unwrap();
+        assert_eq!(app.pane_manager.count(), n + 1);
+    }
+
+    #[test]
+    fn test_handle_new_pane_request_weather() {
+        let mut app = mock_app();
+        let n = app.pane_manager.count();
+        handle_new_pane_request(
+            &mut app,
+            NewPaneRequest::Weather {
+                city: "London".into(),
+                interval_ms: 300_000,
+            },
+        )
+        .unwrap();
+        assert_eq!(app.pane_manager.count(), n + 1);
+    }
+
+    #[test]
+    fn test_handle_new_pane_request_sysinfo() {
+        let mut app = mock_app();
+        let n = app.pane_manager.count();
+        handle_new_pane_request(&mut app, NewPaneRequest::SysInfo { interval_ms: 2000 }).unwrap();
+        assert_eq!(app.pane_manager.count(), n + 1);
+    }
+
+    #[test]
+    fn test_handle_new_pane_request_sparkline() {
+        let mut app = mock_app();
+        let n = app.pane_manager.count();
+        handle_new_pane_request(
+            &mut app,
+            NewPaneRequest::Sparkline {
+                command: "echo 42".into(),
+                interval_ms: 2000,
+            },
+        )
+        .unwrap();
+        assert_eq!(app.pane_manager.count(), n + 1);
+    }
+
+    #[test]
+    fn test_handle_new_pane_request_settings() {
+        let mut app = mock_app();
+        let n = app.pane_manager.count();
+        handle_new_pane_request(&mut app, NewPaneRequest::Settings).unwrap();
+        assert_eq!(app.pane_manager.count(), n + 1);
+    }
 }

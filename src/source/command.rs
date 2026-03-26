@@ -105,4 +105,52 @@ mod tests {
         assert_eq!(src.source_label(), "cmd");
         assert!(!src.is_interactive());
     }
+
+    #[test]
+    fn test_command_source_display_name_with_path() {
+        let src = CommandSource::new("/usr/bin/ls -la".to_string(), 5000);
+        assert_eq!(src.name(), "ls");
+    }
+
+    #[test]
+    fn test_command_source_to_spec() {
+        let src = CommandSource::new("date".to_string(), 3000);
+        let spec = src.to_spec();
+        match spec {
+            PaneSpec::Command {
+                command,
+                interval_ms,
+            } => {
+                assert_eq!(command, "date");
+                assert_eq!(interval_ms, 3000);
+            }
+            _ => panic!("expected Command spec"),
+        }
+    }
+
+    #[test]
+    fn test_command_source_send_keys_noop() {
+        let mut src = CommandSource::new("echo".to_string(), 5000);
+        assert!(src.send_keys("x").is_ok());
+    }
+
+    #[test]
+    fn test_command_source_stderr_included() {
+        let mut src = CommandSource::new("echo err >&2".to_string(), 60_000);
+        let output = src.capture(80, 24).unwrap();
+        assert!(output.contains("err"), "output was: {}", output);
+    }
+
+    #[test]
+    fn test_command_source_no_refresh_before_interval() {
+        let mut src = CommandSource::new("echo first".to_string(), 600_000);
+        let _ = src.capture(80, 24).unwrap(); // first capture triggers refresh
+        assert!(!src.should_refresh()); // should not need refresh yet
+    }
+
+    #[test]
+    fn test_command_source_has_no_custom_render() {
+        let src = CommandSource::new("echo".to_string(), 5000);
+        assert!(!src.has_custom_render());
+    }
 }

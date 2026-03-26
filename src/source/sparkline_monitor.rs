@@ -224,3 +224,89 @@ impl ContentSource for SparklineSource {
         Widget::render(status_para, chunks[3], buf);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::buffer::Buffer;
+
+    #[test]
+    fn test_extract_first_number() {
+        assert_eq!(extract_first_number("42"), Some(42.0));
+        assert_eq!(extract_first_number("cpu: 3.15%"), Some(3.15));
+        assert_eq!(extract_first_number("no numbers here"), None);
+        assert_eq!(extract_first_number("  12.5 load"), Some(12.5));
+        assert_eq!(extract_first_number("-7.3"), Some(-7.3));
+    }
+
+    #[test]
+    fn test_sparkline_new() {
+        let s = SparklineSource::new("echo 42".into(), 2000);
+        assert_eq!(s.display_name, "echo");
+        assert!(s.history.is_empty());
+        assert!(s.current_value.is_none());
+        assert!(s.should_refresh());
+    }
+
+    #[test]
+    fn test_sparkline_metadata() {
+        let s = SparklineSource::new("cat /proc/loadavg".into(), 2000);
+        assert_eq!(s.name(), "cat");
+        assert_eq!(s.source_label(), "spark");
+        assert!(!s.is_interactive());
+        assert!(s.has_custom_render());
+    }
+
+    #[test]
+    fn test_sparkline_render_no_panic() {
+        let s = SparklineSource::new("echo 1".into(), 60_000);
+        let area = Rect::new(0, 0, 40, 10);
+        let mut buf = Buffer::empty(area);
+        s.render(area, &mut buf);
+    }
+
+    #[test]
+    fn test_sparkline_render_with_data() {
+        let mut s = SparklineSource::new("echo 1".into(), 60_000);
+        s.current_value = Some(42.0);
+        for i in 0..20 {
+            s.history.push_back(i * 100);
+        }
+        let area = Rect::new(0, 0, 40, 10);
+        let mut buf = Buffer::empty(area);
+        s.render(area, &mut buf);
+    }
+
+    #[test]
+    fn test_sparkline_render_with_error() {
+        let mut s = SparklineSource::new("bad".into(), 60_000);
+        s.error = Some("command not found".into());
+        let area = Rect::new(0, 0, 40, 10);
+        let mut buf = Buffer::empty(area);
+        s.render(area, &mut buf);
+    }
+
+    #[test]
+    fn test_sparkline_render_small_area() {
+        let s = SparklineSource::new("x".into(), 60_000);
+        let area = Rect::new(0, 0, 5, 2);
+        let mut buf = Buffer::empty(area);
+        s.render(area, &mut buf);
+    }
+
+    #[test]
+    fn test_sparkline_to_spec() {
+        let s = SparklineSource::new("cmd".into(), 1000);
+        let spec = s.to_spec();
+        match spec {
+            PaneSpec::Plugin { plugin_name, .. } => assert_eq!(plugin_name, "sparkline"),
+            _ => panic!("expected Plugin spec"),
+        }
+    }
+
+    #[test]
+    fn test_sparkline_send_keys_noop() {
+        let mut s = SparklineSource::new("x".into(), 2000);
+        assert!(s.send_keys("a").is_ok());
+    }
+}

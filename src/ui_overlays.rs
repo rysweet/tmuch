@@ -261,3 +261,165 @@ pub fn draw_app_launcher(frame: &mut Frame, app: &App, area: Rect) {
 
     frame.render_widget(list, popup);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+    use crate::editor_state::{CommandEditorState, EditorInputMode};
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    #[test]
+    fn test_session_picker_renders() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new(Config::default());
+        app.picker.sessions.push(crate::tmux::SessionInfo {
+            name: "local-session".into(),
+            attached: false,
+            host: None,
+        });
+        app.picker.sessions.push(crate::tmux::SessionInfo {
+            name: "remote-session".into(),
+            attached: true,
+            host: Some("vm1".into()),
+        });
+        terminal
+            .draw(|frame| {
+                draw_session_picker(frame, &app, Rect::new(0, 0, 80, 22));
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn test_session_picker_empty() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let app = App::new(Config::default());
+        terminal
+            .draw(|frame| {
+                draw_session_picker(frame, &app, Rect::new(0, 0, 80, 22));
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn test_command_editor_browse() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new(Config::default());
+        app.command_editor = Some(CommandEditorState {
+            entries: vec![('1', "top".into()), ('2', "htop".into())],
+            selected: 0,
+            input_mode: EditorInputMode::Browse,
+            input_buffer: String::new(),
+            pending_key: None,
+        });
+        terminal
+            .draw(|frame| {
+                draw_command_editor(frame, &app, Rect::new(0, 0, 80, 22));
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn test_command_editor_input_key() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new(Config::default());
+        app.command_editor = Some(CommandEditorState {
+            entries: vec![],
+            selected: 0,
+            input_mode: EditorInputMode::InputKey,
+            input_buffer: String::new(),
+            pending_key: None,
+        });
+        terminal
+            .draw(|frame| {
+                draw_command_editor(frame, &app, Rect::new(0, 0, 80, 22));
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn test_command_editor_input_command() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new(Config::default());
+        app.command_editor = Some(CommandEditorState {
+            entries: vec![('1', "top".into())],
+            selected: 0,
+            input_mode: EditorInputMode::InputCommand,
+            input_buffer: "ls -la".into(),
+            pending_key: Some('3'),
+        });
+        terminal
+            .draw(|frame| {
+                draw_command_editor(frame, &app, Rect::new(0, 0, 80, 22));
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn test_command_editor_no_state() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let app = App::new(Config::default());
+        terminal
+            .draw(|frame| {
+                draw_command_editor(frame, &app, Rect::new(0, 0, 80, 22));
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn test_command_editor_empty_entries() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new(Config::default());
+        app.command_editor = Some(CommandEditorState {
+            entries: vec![],
+            selected: 0,
+            input_mode: EditorInputMode::Browse,
+            input_buffer: String::new(),
+            pending_key: None,
+        });
+        terminal
+            .draw(|frame| {
+                draw_command_editor(frame, &app, Rect::new(0, 0, 80, 22));
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn test_app_launcher_renders() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new(Config::default());
+        app.app_launcher = Some(crate::editor_state::AppLauncherState {
+            apps: vec![
+                ("clock", "Live clock", "clock:"),
+                ("snake", "Snake game", "snake:"),
+            ],
+            selected: 0,
+        });
+        terminal
+            .draw(|frame| {
+                draw_app_launcher(frame, &app, Rect::new(0, 0, 80, 22));
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn test_app_launcher_no_state() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let app = App::new(Config::default());
+        terminal
+            .draw(|frame| {
+                draw_app_launcher(frame, &app, Rect::new(0, 0, 80, 22));
+            })
+            .unwrap();
+    }
+}

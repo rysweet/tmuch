@@ -309,4 +309,78 @@ mod tests {
             NewPaneRequest::Settings
         ));
     }
+
+    #[test]
+    fn test_parse_settings_colon() {
+        assert!(matches!(
+            parse_new_arg("settings:"),
+            NewPaneRequest::Settings
+        ));
+    }
+
+    #[test]
+    fn test_parse_snake_colon() {
+        assert!(matches!(parse_new_arg("snake:"), NewPaneRequest::Snake));
+    }
+
+    #[test]
+    fn test_parse_sysinfo_colon() {
+        match parse_new_arg("sysinfo:") {
+            NewPaneRequest::SysInfo { interval_ms } => assert_eq!(interval_ms, 2000),
+            _ => panic!("expected SysInfo"),
+        }
+    }
+
+    #[test]
+    fn test_parse_spark() {
+        match parse_new_arg("spark:echo 1:500") {
+            NewPaneRequest::Sparkline {
+                command,
+                interval_ms,
+            } => {
+                assert_eq!(command, "echo 1");
+                assert_eq!(interval_ms, 500);
+            }
+            _ => panic!("expected Sparkline"),
+        }
+    }
+
+    #[test]
+    fn test_parse_spark_no_interval() {
+        match parse_new_arg("spark:echo 1") {
+            NewPaneRequest::Sparkline {
+                command,
+                interval_ms,
+            } => {
+                assert_eq!(command, "echo 1");
+                assert_eq!(interval_ms, 2000);
+            }
+            _ => panic!("expected Sparkline"),
+        }
+    }
+
+    #[test]
+    fn test_parse_http_with_interval() {
+        match parse_new_arg("http:localhost:3000") {
+            NewPaneRequest::Http { url, interval_ms } => {
+                assert_eq!(url, "localhost");
+                assert_eq!(interval_ms, 3000);
+            }
+            _ => panic!("expected Http"),
+        }
+    }
+
+    #[test]
+    fn test_parse_watch_no_interval() {
+        match parse_new_arg("watch:uptime") {
+            NewPaneRequest::Command {
+                command,
+                interval_ms,
+            } => {
+                assert_eq!(command, "uptime");
+                assert_eq!(interval_ms, 5000);
+            }
+            _ => panic!("expected Command"),
+        }
+    }
 }

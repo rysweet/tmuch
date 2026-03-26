@@ -176,3 +176,200 @@ pub fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     let bar = Paragraph::new(line).style(Style::default().bg(parse_color(&theme.status_bar.bg)));
     frame.render_widget(bar, area);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+    use crate::source::{ContentSource, PaneSpec};
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    struct MockSource(String);
+
+    impl ContentSource for MockSource {
+        fn capture(&mut self, _w: u16, _h: u16) -> anyhow::Result<String> {
+            Ok("mock".into())
+        }
+        fn send_keys(&mut self, _keys: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn name(&self) -> &str {
+            &self.0
+        }
+        fn source_label(&self) -> &str {
+            "mock"
+        }
+        fn is_interactive(&self) -> bool {
+            false
+        }
+        fn to_spec(&self) -> PaneSpec {
+            PaneSpec::Command {
+                command: "mock".into(),
+                interval_ms: 1000,
+            }
+        }
+    }
+
+    #[test]
+    fn test_hints_bar_normal_mode() {
+        let backend = TestBackend::new(120, 3);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let app = App::new(Config::default());
+        terminal
+            .draw(|frame| {
+                draw_hints_bar(frame, &app, Rect::new(0, 0, 120, 1));
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn test_hints_bar_focused_mode() {
+        let backend = TestBackend::new(120, 3);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new(Config::default());
+        app.mode = Mode::PaneFocused;
+        terminal
+            .draw(|frame| {
+                draw_hints_bar(frame, &app, Rect::new(0, 0, 120, 1));
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn test_hints_bar_picker_mode() {
+        let backend = TestBackend::new(120, 3);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new(Config::default());
+        app.mode = Mode::SessionPicker;
+        terminal
+            .draw(|frame| {
+                draw_hints_bar(frame, &app, Rect::new(0, 0, 120, 1));
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn test_hints_bar_editor_browse() {
+        let backend = TestBackend::new(120, 3);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new(Config::default());
+        app.mode = Mode::CommandEditor;
+        app.command_editor = Some(crate::editor_state::CommandEditorState {
+            entries: vec![],
+            selected: 0,
+            input_mode: EditorInputMode::Browse,
+            input_buffer: String::new(),
+            pending_key: None,
+        });
+        terminal
+            .draw(|frame| {
+                draw_hints_bar(frame, &app, Rect::new(0, 0, 120, 1));
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn test_hints_bar_editor_input_key() {
+        let backend = TestBackend::new(120, 3);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new(Config::default());
+        app.mode = Mode::CommandEditor;
+        app.command_editor = Some(crate::editor_state::CommandEditorState {
+            entries: vec![],
+            selected: 0,
+            input_mode: EditorInputMode::InputKey,
+            input_buffer: String::new(),
+            pending_key: None,
+        });
+        terminal
+            .draw(|frame| {
+                draw_hints_bar(frame, &app, Rect::new(0, 0, 120, 1));
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn test_hints_bar_editor_input_command() {
+        let backend = TestBackend::new(120, 3);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new(Config::default());
+        app.mode = Mode::CommandEditor;
+        app.command_editor = Some(crate::editor_state::CommandEditorState {
+            entries: vec![],
+            selected: 0,
+            input_mode: EditorInputMode::InputCommand,
+            input_buffer: String::new(),
+            pending_key: None,
+        });
+        terminal
+            .draw(|frame| {
+                draw_hints_bar(frame, &app, Rect::new(0, 0, 120, 1));
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn test_hints_bar_app_launcher() {
+        let backend = TestBackend::new(120, 3);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new(Config::default());
+        app.mode = Mode::AppLauncher;
+        terminal
+            .draw(|frame| {
+                draw_hints_bar(frame, &app, Rect::new(0, 0, 120, 1));
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn test_status_bar_empty() {
+        let backend = TestBackend::new(120, 3);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let app = App::new(Config::default());
+        terminal
+            .draw(|frame| {
+                draw_status_bar(frame, &app, Rect::new(0, 0, 120, 1));
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn test_status_bar_with_panes() {
+        let backend = TestBackend::new(120, 3);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new(Config::default());
+        app.pane_manager.add(Box::new(MockSource("test".into())));
+        terminal
+            .draw(|frame| {
+                draw_status_bar(frame, &app, Rect::new(0, 0, 120, 1));
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn test_status_bar_maximized() {
+        let backend = TestBackend::new(120, 3);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new(Config::default());
+        let id = app.pane_manager.add(Box::new(MockSource("test".into())));
+        app.pane_manager.maximized = Some(id);
+        terminal
+            .draw(|frame| {
+                draw_status_bar(frame, &app, Rect::new(0, 0, 120, 1));
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn test_status_bar_narrow() {
+        let backend = TestBackend::new(10, 3);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let app = App::new(Config::default());
+        terminal
+            .draw(|frame| {
+                draw_status_bar(frame, &app, Rect::new(0, 0, 10, 1));
+            })
+            .unwrap();
+    }
+}

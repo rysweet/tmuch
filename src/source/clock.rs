@@ -73,3 +73,69 @@ impl ContentSource for ClockSource {
         Widget::render(time_para, time_area, buf);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_clock_capture() {
+        let mut source = ClockSource;
+        let output = source.capture(80, 24).unwrap();
+        // Should contain a time-like string (HH:MM:SS)
+        assert!(
+            output.contains(':'),
+            "expected time format, got: {}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_clock_metadata() {
+        let source = ClockSource;
+        assert_eq!(source.name(), "clock");
+        assert_eq!(source.source_label(), "widget");
+        assert!(!source.is_interactive());
+        assert!(source.has_custom_render());
+    }
+
+    #[test]
+    fn test_clock_render_no_panic() {
+        let source = ClockSource;
+        let area = Rect::new(0, 0, 40, 10);
+        let mut buf = Buffer::empty(area);
+        source.render(area, &mut buf);
+        // Verify at least some cells are non-empty
+        let content: String = buf
+            .content()
+            .iter()
+            .map(|c| c.symbol().chars().next().unwrap_or(' '))
+            .collect();
+        assert!(!content.trim().is_empty());
+    }
+
+    #[test]
+    fn test_clock_render_small_area() {
+        let source = ClockSource;
+        let area = Rect::new(0, 0, 10, 2);
+        let mut buf = Buffer::empty(area);
+        // Should not panic even with very small area
+        source.render(area, &mut buf);
+    }
+
+    #[test]
+    fn test_clock_send_keys_noop() {
+        let mut source = ClockSource;
+        assert!(source.send_keys("a").is_ok());
+    }
+
+    #[test]
+    fn test_clock_to_spec() {
+        let source = ClockSource;
+        let spec = source.to_spec();
+        match spec {
+            PaneSpec::Plugin { plugin_name, .. } => assert_eq!(plugin_name, "clock"),
+            _ => panic!("expected Plugin spec"),
+        }
+    }
+}
