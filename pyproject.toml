@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tmuch"
-version = "0.3.4"
+version = "0.3.5"
 description = "TUI tmux multiplexer - display multiple tmux sessions in a single terminal"
 readme = "README.md"
 license = "MIT"
