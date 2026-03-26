@@ -89,6 +89,12 @@ impl PaneManager {
         }
     }
 
+    pub fn focus_index(&mut self, idx: usize) {
+        if idx < self.panes.len() {
+            self.focused = idx;
+        }
+    }
+
     pub fn panes(&self) -> &[Pane] {
         &self.panes
     }

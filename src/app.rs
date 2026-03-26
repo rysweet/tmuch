@@ -12,10 +12,11 @@ use crate::source::{self, NewPaneRequest, PaneSpec};
 use crate::tmux;
 use crate::ui;
 use anyhow::Result;
-use crossterm::event::{self, Event};
+use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event, MouseEventKind};
 use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
 use crossterm::ExecutableCommand;
 use ratatui::backend::CrosstermBackend;
+use ratatui::layout::Rect;
 use ratatui::Terminal;
 use std::io;
 use std::time::Duration;
@@ -75,6 +76,7 @@ pub struct App {
     pub picker: SessionPicker,
     pub should_quit: bool,
     pub command_editor: Option<CommandEditorState>,
+    pub pane_rects: Vec<Rect>,
 }
 
 impl App {
@@ -86,6 +88,7 @@ impl App {
             picker: SessionPicker::new(),
             should_quit: false,
             command_editor: None,
+            pane_rects: Vec::new(),
         }
     }
 
@@ -343,6 +346,9 @@ impl App {
                 self.command_editor = None;
                 self.mode = Mode::Normal;
             }
+            Action::FocusPane(idx) => {
+                self.pane_manager.focus_index(idx);
+            }
         }
         Ok(())
     }
@@ -394,6 +400,7 @@ pub fn run_azlin(resource_group: Option<String>) -> Result<()> {
     // Launch TUI with all discovered sessions
     terminal::enable_raw_mode()?;
     io::stdout().execute(EnterAlternateScreen)?;
+    io::stdout().execute(EnableMouseCapture)?;
     let backend = CrosstermBackend::new(io::stdout());
     let mut terminal = Terminal::new(backend)?;
 
@@ -427,13 +434,9 @@ pub fn run_azlin(resource_group: Option<String>) -> Result<()> {
             // Reserve 2 rows: top hint bar + bottom status bar
             let rects = crate::layout::compute(
                 pane_count,
-                ratatui::layout::Rect::new(
-                    0,
-                    1,
-                    term_size.width,
-                    term_size.height.saturating_sub(2),
-                ),
+                Rect::new(0, 1, term_size.width, term_size.height.saturating_sub(2)),
             );
+            app.pane_rects = rects.clone();
             for (i, pane) in app.pane_manager.panes_mut().iter_mut().enumerate() {
                 if let Some(rect) = rects.get(i) {
                     let w = rect.width.saturating_sub(2);
@@ -454,15 +457,35 @@ pub fn run_azlin(resource_group: Option<String>) -> Result<()> {
         }
 
         if event::poll(poll_duration)? {
-            if let Event::Key(key) = event::read()? {
-                if let Some(action) = keys::handle(key, &app.mode, &app.config) {
-                    app.handle_action(action)?;
+            match event::read()? {
+                Event::Key(key) => {
+                    if let Some(action) = keys::handle(key, &app.mode, &app.config) {
+                        app.handle_action(action)?;
+                    }
                 }
+                Event::Mouse(mouse) => {
+                    if let MouseEventKind::Down(crossterm::event::MouseButton::Left) = mouse.kind {
+                        let col = mouse.column;
+                        let row = mouse.row;
+                        for (idx, rect) in app.pane_rects.iter().enumerate() {
+                            if col >= rect.x
+                                && col < rect.x + rect.width
+                                && row >= rect.y
+                                && row < rect.y + rect.height
+                            {
+                                app.handle_action(Action::FocusPane(idx))?;
+                                break;
+                            }
+                        }
+                    }
+                }
+                _ => {}
             }
         }
     }
 
     terminal::disable_raw_mode()?;
+    io::stdout().execute(DisableMouseCapture)?;
     io::stdout().execute(LeaveAlternateScreen)?;
     Ok(())
 }
@@ -477,6 +500,7 @@ pub fn run(
     // Setup terminal
     terminal::enable_raw_mode()?;
     io::stdout().execute(EnterAlternateScreen)?;
+    io::stdout().execute(EnableMouseCapture)?;
     let backend = CrosstermBackend::new(io::stdout());
     let mut terminal = Terminal::new(backend)?;
 
@@ -547,13 +571,9 @@ pub fn run(
             // Reserve 2 rows: top hint bar + bottom status bar
             let rects = crate::layout::compute(
                 pane_count,
-                ratatui::layout::Rect::new(
-                    0,
-                    1,
-                    term_size.width,
-                    term_size.height.saturating_sub(2),
-                ),
+                Rect::new(0, 1, term_size.width, term_size.height.saturating_sub(2)),
             );
+            app.pane_rects = rects.clone();
             for (i, pane) in app.pane_manager.panes_mut().iter_mut().enumerate() {
                 if let Some(rect) = rects.get(i) {
                     let w = rect.width.saturating_sub(2);
@@ -576,10 +596,29 @@ pub fn run(
 
         // Handle events
         if event::poll(poll_duration)? {
-            if let Event::Key(key) = event::read()? {
-                if let Some(action) = keys::handle(key, &app.mode, &app.config) {
-                    app.handle_action(action)?;
+            match event::read()? {
+                Event::Key(key) => {
+                    if let Some(action) = keys::handle(key, &app.mode, &app.config) {
+                        app.handle_action(action)?;
+                    }
                 }
+                Event::Mouse(mouse) => {
+                    if let MouseEventKind::Down(crossterm::event::MouseButton::Left) = mouse.kind {
+                        let col = mouse.column;
+                        let row = mouse.row;
+                        for (idx, rect) in app.pane_rects.iter().enumerate() {
+                            if col >= rect.x
+                                && col < rect.x + rect.width
+                                && row >= rect.y
+                                && row < rect.y + rect.height
+                            {
+                                app.handle_action(Action::FocusPane(idx))?;
+                                break;
+                            }
+                        }
+                    }
+                }
+                _ => {}
             }
         }
     }
@@ -600,6 +639,7 @@ pub fn run(
 
     // Cleanup
     terminal::disable_raw_mode()?;
+    io::stdout().execute(DisableMouseCapture)?;
     io::stdout().execute(LeaveAlternateScreen)?;
 
     Ok(())

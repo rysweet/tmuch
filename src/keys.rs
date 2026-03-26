@@ -33,6 +33,7 @@ pub enum Action {
     EditorDown,
     EditorDelete,
     EditorClose,
+    FocusPane(usize),
 }
 
 pub fn handle(event: KeyEvent, mode: &Mode, config: &Config) -> Option<Action> {
