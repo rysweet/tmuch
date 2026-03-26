@@ -8,6 +8,7 @@ pub enum Mode {
     PaneFocused,
     SessionPicker,
     CommandEditor,
+    AppLauncher,
 }
 
 #[derive(Debug)]
@@ -40,6 +41,11 @@ pub enum Action {
     SplitHorizontal,
     ToggleMaximize,
     SwapPane,
+    OpenAppLauncher,
+    LauncherUp,
+    LauncherDown,
+    LauncherConfirm,
+    LauncherCancel,
 }
 
 pub fn handle(event: KeyEvent, mode: &Mode, config: &Config) -> Option<Action> {
@@ -48,6 +54,7 @@ pub fn handle(event: KeyEvent, mode: &Mode, config: &Config) -> Option<Action> {
         Mode::PaneFocused => handle_pane_focused(event),
         Mode::SessionPicker => handle_picker(event),
         Mode::CommandEditor => handle_command_editor(event),
+        Mode::AppLauncher => handle_app_launcher(event),
     }
 }
 
@@ -65,6 +72,7 @@ fn handle_normal(event: KeyEvent, config: &Config) -> Option<Action> {
             KeyCode::Char('h') => Some(Action::SplitHorizontal),
             KeyCode::Char('f') => Some(Action::ToggleMaximize),
             KeyCode::Char('x') => Some(Action::SwapPane),
+            KeyCode::Char('n') => Some(Action::OpenAppLauncher),
             _ => None,
         };
     }
@@ -119,6 +127,16 @@ fn handle_command_editor(event: KeyEvent) -> Option<Action> {
         KeyCode::Down | KeyCode::Char('j') => Some(Action::EditorDown),
         KeyCode::Char('d') => Some(Action::EditorDelete),
         KeyCode::Char('a') => None, // no-op: hint says edit config file
+        _ => None,
+    }
+}
+
+fn handle_app_launcher(event: KeyEvent) -> Option<Action> {
+    match event.code {
+        KeyCode::Esc => Some(Action::LauncherCancel),
+        KeyCode::Up | KeyCode::Char('k') => Some(Action::LauncherUp),
+        KeyCode::Down | KeyCode::Char('j') => Some(Action::LauncherDown),
+        KeyCode::Enter => Some(Action::LauncherConfirm),
         _ => None,
     }
 }

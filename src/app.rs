@@ -31,6 +31,44 @@ use std::io;
 use std::sync::mpsc;
 use std::time::Duration;
 
+/// State for the app launcher overlay.
+pub struct AppLauncherState {
+    pub apps: Vec<(&'static str, &'static str, &'static str)>, // (name, desc, usage)
+    pub selected: usize,
+}
+
+impl AppLauncherState {
+    pub fn new() -> Self {
+        let registry = crate::source::registry::PluginRegistry::new();
+        let apps: Vec<_> = registry
+            .list()
+            .iter()
+            .map(|info| (info.name, info.description, info.usage))
+            .collect();
+        Self { apps, selected: 0 }
+    }
+
+    pub fn select_next(&mut self) {
+        if !self.apps.is_empty() {
+            self.selected = (self.selected + 1) % self.apps.len();
+        }
+    }
+
+    pub fn select_prev(&mut self) {
+        if !self.apps.is_empty() {
+            self.selected = if self.selected == 0 {
+                self.apps.len() - 1
+            } else {
+                self.selected - 1
+            };
+        }
+    }
+
+    pub fn selected_usage(&self) -> Option<&'static str> {
+        self.apps.get(self.selected).map(|(_, _, u)| *u)
+    }
+}
+
 /// State for the command editor overlay.
 pub struct CommandEditorState {
     pub entries: Vec<(char, String)>,
@@ -100,6 +138,7 @@ pub struct App {
     pub theme: Theme,
     pub plugin_registry: PluginRegistry,
     pub drag_state: Option<DragState>,
+    pub app_launcher: Option<AppLauncherState>,
 }
 
 impl App {
@@ -114,6 +153,7 @@ impl App {
             command_editor: None,
             pane_rects: Vec::new(),
             theme,
+            app_launcher: None,
             plugin_registry: PluginRegistry::new(),
             drag_state: None,
         }
@@ -405,6 +445,84 @@ impl App {
             }
             Action::SwapPane => {
                 self.pane_manager.swap_focused_with_next();
+            }
+            Action::OpenAppLauncher => {
+                self.app_launcher = Some(AppLauncherState::new());
+                self.mode = Mode::AppLauncher;
+            }
+            Action::LauncherUp => {
+                if let Some(ref mut launcher) = self.app_launcher {
+                    launcher.select_prev();
+                }
+            }
+            Action::LauncherDown => {
+                if let Some(ref mut launcher) = self.app_launcher {
+                    launcher.select_next();
+                }
+            }
+            Action::LauncherConfirm => {
+                if let Some(ref launcher) = self.app_launcher {
+                    if let Some(usage) = launcher.selected_usage() {
+                        // Parse the usage string as a -n argument
+                        let arg = usage.split_once(' ').map(|(u, _)| u).unwrap_or(usage);
+                        let request = crate::source::parse_new_arg(arg);
+                        match request {
+                            NewPaneRequest::TmuxCommand { command } => {
+                                let _ = self.create_local_tmux(Some(&command));
+                            }
+                            NewPaneRequest::Command {
+                                command,
+                                interval_ms,
+                            } => {
+                                let source = CommandSource::new(command, interval_ms);
+                                self.pane_manager.add(Box::new(source));
+                            }
+                            NewPaneRequest::Tail { path } => {
+                                if let Ok(source) = TailSource::new(&path) {
+                                    self.pane_manager.add(Box::new(source));
+                                }
+                            }
+                            NewPaneRequest::Http { url, interval_ms } => {
+                                let source = HttpSource::new(url, interval_ms);
+                                self.pane_manager.add(Box::new(source));
+                            }
+                            NewPaneRequest::Clock => {
+                                let source = crate::source::clock::ClockSource;
+                                self.pane_manager.add(Box::new(source));
+                            }
+                            NewPaneRequest::Weather { city, interval_ms } => {
+                                let source =
+                                    crate::source::weather::WeatherSource::new(city, interval_ms);
+                                self.pane_manager.add(Box::new(source));
+                            }
+                            NewPaneRequest::SysInfo { interval_ms } => {
+                                let source =
+                                    crate::source::sysinfo::SysInfoSource::new(interval_ms);
+                                self.pane_manager.add(Box::new(source));
+                            }
+                            NewPaneRequest::Snake => {
+                                let source = crate::source::snake::SnakeSource::new();
+                                self.pane_manager.add(Box::new(source));
+                            }
+                            NewPaneRequest::Sparkline {
+                                command,
+                                interval_ms,
+                            } => {
+                                let source = crate::source::sparkline_monitor::SparklineSource::new(
+                                    command,
+                                    interval_ms,
+                                );
+                                self.pane_manager.add(Box::new(source));
+                            }
+                        }
+                    }
+                }
+                self.app_launcher = None;
+                self.mode = Mode::Normal;
+            }
+            Action::LauncherCancel => {
+                self.app_launcher = None;
+                self.mode = Mode::Normal;
             }
         }
         Ok(())

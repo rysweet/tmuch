@@ -1,26 +1,36 @@
-use std::collections::HashMap;
-
 use super::ContentSource;
 
 type PluginConstructor = Box<dyn Fn(toml::Value) -> Box<dyn ContentSource> + Send + Sync>;
 
-/// A registry that maps plugin names to constructors for creating content sources.
+/// Metadata for a registered plugin/app.
+pub struct PluginInfo {
+    pub name: &'static str,
+    pub description: &'static str,
+    pub usage: &'static str,
+    constructor: PluginConstructor,
+}
+
+/// A registry that maps plugin names to constructors and metadata.
 pub struct PluginRegistry {
-    plugins: HashMap<String, PluginConstructor>,
+    plugins: Vec<PluginInfo>,
 }
 
 impl PluginRegistry {
     pub fn new() -> Self {
         let mut reg = Self {
-            plugins: HashMap::new(),
+            plugins: Vec::new(),
         };
-        // Register built-in plugins
-        reg.register(
+
+        reg.add(
             "clock",
-            Box::new(|_config| Box::new(super::clock::ClockSource)),
+            "Live clock display",
+            "clock:",
+            Box::new(|_| Box::new(super::clock::ClockSource)),
         );
-        reg.register(
+        reg.add(
             "weather",
+            "Weather from wttr.in with color-coded temperature",
+            "weather:City or weather:City:interval_ms",
             Box::new(|config| {
                 let city = config
                     .get("city")
@@ -34,8 +44,10 @@ impl PluginRegistry {
                 Box::new(super::weather::WeatherSource::new(city, interval_ms))
             }),
         );
-        reg.register(
+        reg.add(
             "sysinfo",
+            "CPU, memory, disk gauges with load average",
+            "sysinfo: or sysinfo:interval_ms",
             Box::new(|config| {
                 let interval_ms = config
                     .get("interval_ms")
@@ -44,12 +56,16 @@ impl PluginRegistry {
                 Box::new(super::sysinfo::SysInfoSource::new(interval_ms))
             }),
         );
-        reg.register(
+        reg.add(
             "snake",
-            Box::new(|_config| Box::new(super::snake::SnakeSource::new())),
+            "Playable snake game (arrow keys to steer)",
+            "snake:",
+            Box::new(|_| Box::new(super::snake::SnakeSource::new())),
         );
-        reg.register(
+        reg.add(
             "sparkline",
+            "Real-time sparkline chart from command output",
+            "spark:command:interval_ms",
             Box::new(|config| {
                 let command = config
                     .get("command")
@@ -66,14 +82,53 @@ impl PluginRegistry {
                 ))
             }),
         );
+
+        // Built-in non-widget sources (for documentation only)
+        reg.add(
+            "watch",
+            "Run a command periodically and display output",
+            "watch:command:interval_ms",
+            Box::new(|_| Box::new(super::clock::ClockSource)), // placeholder
+        );
+        reg.add(
+            "tail",
+            "Follow a file with tail -f",
+            "tail:/path/to/file",
+            Box::new(|_| Box::new(super::clock::ClockSource)),
+        );
+        reg.add(
+            "http",
+            "Poll an HTTP URL periodically",
+            "http:url:interval_ms",
+            Box::new(|_| Box::new(super::clock::ClockSource)),
+        );
+
         reg
     }
 
-    pub fn register(&mut self, name: &str, constructor: PluginConstructor) {
-        self.plugins.insert(name.to_string(), constructor);
+    fn add(
+        &mut self,
+        name: &'static str,
+        description: &'static str,
+        usage: &'static str,
+        constructor: PluginConstructor,
+    ) {
+        self.plugins.push(PluginInfo {
+            name,
+            description,
+            usage,
+            constructor,
+        });
     }
 
     pub fn create(&self, name: &str, config: toml::Value) -> Option<Box<dyn ContentSource>> {
-        self.plugins.get(name).map(|ctor| ctor(config))
+        self.plugins
+            .iter()
+            .find(|p| p.name == name)
+            .map(|p| (p.constructor)(config))
+    }
+
+    pub fn list(&self) -> &[PluginInfo] {
+        &self.plugins
     }
 }
