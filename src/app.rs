@@ -87,6 +87,7 @@ pub struct CommandEditorState {
 }
 
 impl CommandEditorState {
+    #[allow(dead_code)]
     pub fn from_config(config: &Config) -> Self {
         let mut entries: Vec<(char, String)> = config
             .bindings
@@ -419,9 +420,9 @@ impl App {
                 }
                 self.mode = Mode::Normal;
             }
-            Action::OpenCommandEditor => {
-                self.command_editor = Some(CommandEditorState::from_config(&self.config));
-                self.mode = Mode::CommandEditor;
+            Action::OpenSettings => {
+                let source = crate::source::settings::SettingsSource::from_config(&self.config);
+                self.pane_manager.add(Box::new(source));
             }
             Action::EditorUp => {
                 if let Some(ref mut editor) = self.command_editor {
@@ -595,6 +596,12 @@ impl App {
                                 let source = crate::source::sparkline_monitor::SparklineSource::new(
                                     command,
                                     interval_ms,
+                                );
+                                self.pane_manager.add(Box::new(source));
+                            }
+                            NewPaneRequest::Settings => {
+                                let source = crate::source::settings::SettingsSource::from_config(
+                                    &self.config,
                                 );
                                 self.pane_manager.add(Box::new(source));
                             }
@@ -979,6 +986,10 @@ pub fn run(
                 } => {
                     app.pane_manager
                         .add(Box::new(SparklineSource::new(command, interval_ms)));
+                }
+                NewPaneRequest::Settings => {
+                    let source = crate::source::settings::SettingsSource::from_config(&app.config);
+                    app.pane_manager.add(Box::new(source));
                 }
             }
         }

@@ -83,6 +83,16 @@ impl PluginRegistry {
             }),
         );
 
+        reg.add(
+            "settings",
+            "Settings panel — bindings, remotes, theme, about",
+            "settings:",
+            Box::new(|_| {
+                let config = crate::config::load().unwrap_or_default();
+                Box::new(super::settings::SettingsSource::from_config(&config))
+            }),
+        );
+
         // Built-in non-widget sources (for documentation only)
         reg.add(
             "watch",
