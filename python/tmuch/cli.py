@@ -12,7 +12,7 @@ import urllib.request
 from pathlib import Path
 
 GITHUB_REPO = "rysweet/tmuch"
-VERSION = "0.3.7"
+VERSION = "0.3.8"
 
 
 def _platform_suffix() -> str:
