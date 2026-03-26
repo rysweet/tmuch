@@ -120,6 +120,11 @@ pub fn draw(frame: &mut Frame, app: &App) {
     if app.mode == Mode::CommandEditor {
         draw_command_editor(frame, app, main_area);
     }
+
+    // Draw app launcher overlay if active
+    if app.mode == Mode::AppLauncher {
+        draw_app_launcher(frame, app, main_area);
+    }
 }
 
 fn sep() -> Span<'static> {
@@ -160,6 +165,8 @@ fn draw_hints_bar(frame: &mut Frame, app: &App, area: Rect) {
             spans.push(sep());
             spans.extend(hint("F11", " Max", Color::Yellow));
             spans.push(sep());
+            spans.extend(hint("^N", " Apps", Color::LightCyan));
+            spans.push(sep());
             spans.extend(hint("1-9", " Bindings", Color::Magenta));
         }
         Mode::PaneFocused => {
@@ -193,6 +200,13 @@ fn draw_hints_bar(frame: &mut Frame, app: &App, area: Rect) {
                 Style::default().fg(Color::Rgb(80, 80, 80)),
             ));
         }
+        Mode::AppLauncher => {
+            spans.extend(hint("\u{2191}\u{2193}/jk", " Nav", Color::Yellow));
+            spans.push(sep());
+            spans.extend(hint("Enter", " Launch", Color::Green));
+            spans.push(sep());
+            spans.extend(hint("Esc", " Cancel", Color::Red));
+        }
     }
 
     let line = Line::from(spans);
@@ -206,6 +220,7 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         Mode::PaneFocused => "FOCUSED",
         Mode::SessionPicker => "PICKER",
         Mode::CommandEditor => "EDITOR",
+        Mode::AppLauncher => "APPS",
     };
 
     let theme = &app.theme;
@@ -367,6 +382,66 @@ fn draw_command_editor(frame: &mut Frame, app: &App, area: Rect) {
             .borders(Borders::ALL)
             .border_type(border_type)
             .border_style(Style::default().fg(Color::Cyan)),
+    );
+
+    frame.render_widget(list, popup);
+}
+
+fn draw_app_launcher(frame: &mut Frame, app: &App, area: Rect) {
+    let launcher = match &app.app_launcher {
+        Some(l) => l,
+        None => return,
+    };
+
+    let border_type = parse_border_type(&app.theme.border.style);
+    let w = 60.min(area.width.saturating_sub(4));
+    let h = ((launcher.apps.len() as u16) + 3)
+        .min(area.height.saturating_sub(4))
+        .max(6);
+    let x = area.x + (area.width.saturating_sub(w)) / 2;
+    let y = area.y + (area.height.saturating_sub(h)) / 2;
+    let popup = Rect::new(x, y, w, h);
+
+    frame.render_widget(Clear, popup);
+
+    let items: Vec<ListItem> = launcher
+        .apps
+        .iter()
+        .enumerate()
+        .map(|(i, (name, desc, _usage))| {
+            let prefix = if i == launcher.selected {
+                "\u{25b6} "
+            } else {
+                "  "
+            };
+            let style = if i == launcher.selected {
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::White)
+            };
+            let line = Line::from(vec![
+                Span::styled(prefix, style),
+                Span::styled(*name, style),
+                Span::styled(
+                    format!("  {}", desc),
+                    Style::default().fg(Color::Rgb(100, 100, 100)),
+                ),
+            ]);
+            ListItem::new(line)
+        })
+        .collect();
+
+    let list = List::new(items).block(
+        Block::default()
+            .title(Line::from(Span::styled(
+                " Apps ",
+                Style::default().fg(Color::LightCyan),
+            )))
+            .borders(Borders::ALL)
+            .border_type(border_type)
+            .border_style(Style::default().fg(Color::LightCyan)),
     );
 
     frame.render_widget(list, popup);

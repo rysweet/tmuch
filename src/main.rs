@@ -73,6 +73,9 @@ enum Commands {
         /// JSON command to send (e.g. '{"command":"list_panes"}')
         json: String,
     },
+
+    /// List available pane types and widget apps
+    Apps,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -110,6 +113,17 @@ fn main() -> anyhow::Result<()> {
                     std::process::exit(1);
                 }
             }
+            return Ok(());
+        }
+        Some(Commands::Apps) => {
+            let registry = source::registry::PluginRegistry::new();
+            println!("Available pane types:\n");
+            for info in registry.list() {
+                println!("  {:<12} {}", info.name, info.description);
+                println!("  {:<12} Usage: {}", "", info.usage);
+                println!();
+            }
+            println!("\nExample: tmuch -n 'weather:Seattle' -n 'sysinfo:' -n 'snake:'");
             return Ok(());
         }
         None => {}
