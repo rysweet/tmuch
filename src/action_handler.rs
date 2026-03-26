@@ -71,6 +71,7 @@ pub fn handle_action(app: &mut App, action: Action) -> Result<()> {
             }
         }
         Action::DiscoverAzlin => {
+            app.busy = Some("Discovering Azure VMs...".into());
             if app.config.azlin.enabled {
                 app.picker
                     .refresh_with_remotes(&app.config.remote, &app.config.azlin)?;
@@ -83,9 +84,11 @@ pub fn handle_action(app: &mut App, action: Action) -> Result<()> {
                 app.picker
                     .refresh_with_remotes(&app.config.remote, &azlin_cfg)?;
             }
+            app.busy = None;
             app.mode = Mode::SessionPicker;
         }
         Action::PickerScanAzlin => {
+            app.busy = Some("Scanning azlin VMs...".into());
             let rg = app.config.azlin.resource_group.as_deref();
             let result = crate::azlin_integration::discover_remote_sessions_sync(rg);
             if let Ok(remote_sessions) = result {
@@ -100,6 +103,7 @@ pub fn handle_action(app: &mut App, action: Action) -> Result<()> {
                     }
                 }
             }
+            app.busy = None;
         }
         Action::PickerAddAll => {
             let sessions: Vec<_> = app.picker.sessions.clone();

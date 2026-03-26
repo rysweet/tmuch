@@ -99,6 +99,7 @@ pub fn run_azlin(resource_group: Option<String>) -> Result<()> {
 
     loop {
         capture_pane_content(&mut app, &terminal)?;
+        app.spinner_tick = app.spinner_tick.wrapping_add(1);
         terminal.draw(|frame| ui::draw(frame, &app))?;
 
         if app.should_quit {
@@ -170,6 +171,7 @@ pub fn run(
 
     loop {
         capture_pane_content(&mut app, &terminal)?;
+        app.spinner_tick = app.spinner_tick.wrapping_add(1);
         terminal.draw(|frame| ui::draw(frame, &app))?;
 
         if app.should_quit {
