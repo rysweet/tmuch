@@ -3,7 +3,7 @@
 use crate::app::App;
 use crate::source::command::CommandSource;
 use crate::source::local_tmux::LocalTmuxSource;
-use crate::source::ssh_subprocess::{RemoteConfig, SshSubprocessSource};
+use crate::source::ssh_subprocess::RemoteConfig;
 use crate::source::tail::TailSource;
 use crate::source::PaneSpec;
 use crate::tmux;
@@ -63,14 +63,8 @@ pub fn add_from_spec(app: &mut App, spec: &PaneSpec) -> Result<()> {
                 .find(|r| r.name == *remote_name)
                 .ok_or_else(|| anyhow::anyhow!("Remote '{}' not found in config", remote_name))?
                 .clone();
-            let source = SshSubprocessSource::new(
-                remote.name.clone(),
-                remote.host.clone(),
-                remote.user.clone(),
-                remote.port,
-                session.clone(),
-                remote.poll_interval_ms,
-            );
+            let source =
+                crate::source::ssh_subprocess::from_remote_config(&remote, session.clone());
             app.pane_manager.add(Box::new(source));
         }
     }
@@ -102,16 +96,10 @@ pub fn attach_remote(app: &mut App, host_session: &str) -> Result<()> {
             key: None,
             port: 22,
             poll_interval_ms: 500,
+            bastion: None,
         });
 
-    let source = SshSubprocessSource::new(
-        remote.name.clone(),
-        remote.host.clone(),
-        remote.user.clone(),
-        remote.port,
-        session.to_string(),
-        remote.poll_interval_ms,
-    );
+    let source = crate::source::ssh_subprocess::from_remote_config(&remote, session.to_string());
     app.pane_manager.add(Box::new(source));
     Ok(())
 }
@@ -119,14 +107,8 @@ pub fn attach_remote(app: &mut App, host_session: &str) -> Result<()> {
 /// Add a remote session pane by host name.
 pub fn add_remote_session_pane(app: &mut App, host: &str, session_name: &str) {
     if let Some(remote) = app.config.remote.iter().find(|r| r.name == host).cloned() {
-        let source = SshSubprocessSource::new(
-            remote.name.clone(),
-            remote.host.clone(),
-            remote.user.clone(),
-            remote.port,
-            session_name.to_string(),
-            remote.poll_interval_ms,
-        );
+        let source =
+            crate::source::ssh_subprocess::from_remote_config(&remote, session_name.to_string());
         app.pane_manager.add(Box::new(source));
     }
 }

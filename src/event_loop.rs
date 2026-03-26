@@ -8,7 +8,6 @@ use crate::source::command::CommandSource;
 use crate::source::http::HttpSource;
 use crate::source::snake::SnakeSource;
 use crate::source::sparkline_monitor::SparklineSource;
-use crate::source::ssh_subprocess::SshSubprocessSource;
 use crate::source::sysinfo::SysInfoSource;
 use crate::source::tail::TailSource;
 use crate::source::weather::WeatherSource;
@@ -87,13 +86,9 @@ pub fn run_azlin(resource_group: Option<String>) -> Result<()> {
         let vm = vms.iter().find(|v| v.name == vm_name);
         if let Some(vm) = vm {
             if let Ok(remote) = crate::azlin_integration::vm_to_remote_config(vm) {
-                let source = SshSubprocessSource::new(
-                    remote.name,
-                    remote.host,
-                    remote.user,
-                    remote.port,
+                let source = crate::source::ssh_subprocess::from_remote_config(
+                    &remote,
                     session_info.name.clone(),
-                    remote.poll_interval_ms,
                 );
                 app.pane_manager.add(Box::new(source));
             }
@@ -104,6 +99,7 @@ pub fn run_azlin(resource_group: Option<String>) -> Result<()> {
 
     loop {
         capture_pane_content(&mut app, &terminal)?;
+        app.spinner_tick = app.spinner_tick.wrapping_add(1);
         terminal.draw(|frame| ui::draw(frame, &app))?;
 
         if app.should_quit {
@@ -175,6 +171,7 @@ pub fn run(
 
     loop {
         capture_pane_content(&mut app, &terminal)?;
+        app.spinner_tick = app.spinner_tick.wrapping_add(1);
         terminal.draw(|frame| ui::draw(frame, &app))?;
 
         if app.should_quit {
@@ -273,6 +270,7 @@ fn capture_pane_content(
 fn handle_event(app: &mut App, ev: Event, main_area: Rect) -> Result<()> {
     match ev {
         Event::Key(key) => {
+            crate::dlog!("key: {:?}", key);
             if let Some(action) =
                 keys::handle(key, &app.mode, &app.config, &app.editor_input_mode())
             {
@@ -379,6 +377,10 @@ pub fn add_pane_from_request(app: &mut App, request: NewPaneRequest) -> Result<(
         }
         NewPaneRequest::Settings => {
             let source = crate::source::settings::SettingsSource::from_config(&app.config);
+            app.pane_manager.add(Box::new(source));
+        }
+        NewPaneRequest::DebugLog => {
+            let source = crate::source::debug_log::DebugLogSource::new();
             app.pane_manager.add(Box::new(source));
         }
     }

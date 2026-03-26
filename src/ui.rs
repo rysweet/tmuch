@@ -1,13 +1,13 @@
 use crate::app::App;
 use crate::keys::Mode;
-use crate::theme::{parse_border_type, parse_color};
+use crate::theme::parse_color;
 use crate::ui_bars::{draw_hints_bar, draw_status_bar};
 use crate::ui_overlays::{draw_app_launcher, draw_command_editor, draw_session_picker};
 use ansi_to_tui::IntoText;
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
 use ratatui::Frame;
 
 pub fn draw(frame: &mut Frame, app: &App) {
@@ -30,7 +30,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
 
     // Draw panes
     let theme = &app.theme;
-    let border_type = parse_border_type(&theme.border.style);
+    // border_type is now per-pane (Double for focused, Rounded for unfocused)
 
     // Get rects to render: if maximized, only the maximized pane
     let render_list: Vec<_> = if let Some(max_id) = app.pane_manager.maximized {
@@ -64,6 +64,13 @@ pub fn draw(frame: &mut Frame, app: &App) {
             parse_color(&theme.border.unfocused)
         };
 
+        // Focused pane uses Double border, unfocused uses Rounded
+        let border_type = if is_focused {
+            BorderType::Double
+        } else {
+            BorderType::Rounded
+        };
+
         let label = pane.source_label();
         let title_spans = if is_focused && app.mode == Mode::PaneFocused {
             vec![Span::styled(
@@ -80,21 +87,34 @@ pub fn draw(frame: &mut Frame, app: &App) {
             } else {
                 Style::default().fg(parse_color(&theme.title.unfocused))
             };
+            // Focused pane title has triangle prefix
+            let prefix = if is_focused { " \u{25b6} " } else { "   " };
             if label != "local" {
                 vec![Span::styled(
-                    format!(" {} [{}] ", pane.name(), label),
+                    format!("{}{}[{}] ", prefix, pane.name(), label),
                     name_style,
                 )]
             } else {
-                vec![Span::styled(format!(" {} ", pane.name()), name_style)]
+                vec![Span::styled(
+                    format!("{}{} ", prefix, pane.name()),
+                    name_style,
+                )]
             }
+        };
+
+        // Focused pane has a subtle blue background tint
+        let block_style = if is_focused {
+            Style::default().bg(Color::Rgb(25, 35, 50))
+        } else {
+            Style::default()
         };
 
         let block = Block::default()
             .title(Line::from(title_spans))
             .borders(Borders::ALL)
             .border_type(border_type)
-            .border_style(Style::default().fg(border_color));
+            .border_style(Style::default().fg(border_color))
+            .style(block_style);
 
         let inner = block.inner(*rect);
 

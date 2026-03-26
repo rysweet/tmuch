@@ -16,6 +16,8 @@ pub struct VmInfo {
     pub admin_username: Option<String>,
     pub public_ip: Option<String>,
     pub private_ip: Option<String>,
+    pub resource_group: Option<String>,
+    pub subscription_id: Option<String>,
 }
 
 /// Config section for azlin integration.
@@ -43,6 +45,9 @@ pub fn discover_vms(resource_group: Option<&str>) -> Result<Vec<VmInfo>> {
             .map_err(|e| anyhow::anyhow!("{}", e))?
     };
 
+    let subscription_id = vm_manager.subscription_id().to_string();
+    crate::dlog!("azlin: discovered {} VMs total", vms.len());
+
     Ok(vms
         .into_iter()
         .filter(|vm| {
@@ -54,6 +59,8 @@ pub fn discover_vms(resource_group: Option<&str>) -> Result<Vec<VmInfo>> {
             admin_username: vm.admin_username.clone(),
             public_ip: vm.public_ip.clone(),
             private_ip: vm.private_ip.clone(),
+            resource_group: Some(vm.resource_group.clone()),
+            subscription_id: Some(subscription_id.clone()),
         })
         .collect())
 }
@@ -78,21 +85,77 @@ pub fn vm_to_remote_config_with(
 
     let key = resolve_ssh_key();
 
-    let host = vm
-        .public_ip
-        .as_ref()
-        .or(vm.private_ip.as_ref())
-        .ok_or_else(|| anyhow::anyhow!("VM '{}' has no IP", vm.name))?
-        .clone();
-
-    Ok(RemoteConfig {
-        name: vm.name.clone(),
-        host,
-        user,
-        key,
-        port: 22,
-        poll_interval_ms: 500,
-    })
+    // If the VM has a public IP, use direct SSH.
+    // Otherwise, try bastion SSH via `az network bastion ssh`.
+    if let Some(ref public_ip) = vm.public_ip {
+        Ok(RemoteConfig {
+            name: vm.name.clone(),
+            host: public_ip.clone(),
+            user,
+            key,
+            port: 22,
+            poll_interval_ms: 500,
+            bastion: None,
+        })
+    } else if let Some(ref rg) = vm.resource_group {
+        // No public IP — attempt bastion
+        let bastion_name = detect_bastion(rg).unwrap_or_default();
+        if bastion_name.is_empty() {
+            // No bastion found either, fall back to private IP
+            let host = vm
+                .private_ip
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("VM '{}' has no IP", vm.name))?
+                .clone();
+            crate::dlog!(
+                "azlin: VM '{}' has no public IP and no bastion, using private IP",
+                vm.name
+            );
+            Ok(RemoteConfig {
+                name: vm.name.clone(),
+                host,
+                user,
+                key,
+                port: 22,
+                poll_interval_ms: 500,
+                bastion: None,
+            })
+        } else {
+            crate::dlog!(
+                "azlin: VM '{}' using bastion '{}' in rg '{}'",
+                vm.name,
+                bastion_name,
+                rg
+            );
+            let vm_rid = build_vm_resource_id(vm)?;
+            // For bastion, host is the bastion_name (used for display), not an IP
+            Ok(RemoteConfig {
+                name: vm.name.clone(),
+                host: vm.private_ip.clone().unwrap_or_default(),
+                user,
+                key,
+                port: 22,
+                poll_interval_ms: 500,
+                bastion: Some(format!("{}:{}:{}", bastion_name, rg, vm_rid)),
+            })
+        }
+    } else {
+        // No resource group info, fall back to private IP
+        let host = vm
+            .private_ip
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("VM '{}' has no IP", vm.name))?
+            .clone();
+        Ok(RemoteConfig {
+            name: vm.name.clone(),
+            host,
+            user,
+            key,
+            port: 22,
+            poll_interval_ms: 500,
+            bastion: None,
+        })
+    }
 }
 
 /// Discover tmux sessions on all reachable VMs using SSH subprocess.
@@ -109,28 +172,63 @@ pub fn discover_remote_sessions_sync(resource_group: Option<&str>) -> Result<Vec
             }
         };
 
-        let mut ssh_args = vec![
-            "-o".to_string(),
-            "StrictHostKeyChecking=accept-new".to_string(),
-            "-o".to_string(),
-            "ConnectTimeout=5".to_string(),
-            "-o".to_string(),
-            "BatchMode=yes".to_string(),
-        ];
-        if let Some(ref key) = remote.key {
-            ssh_args.push("-i".to_string());
-            ssh_args.push(key.clone());
-        } else if let Some(key_path) = resolve_ssh_key_path() {
-            ssh_args.push("-i".to_string());
-            ssh_args.push(key_path.to_string_lossy().to_string());
-        }
-        ssh_args.push("-p".to_string());
-        ssh_args.push(remote.port.to_string());
-        ssh_args.push(format!("{}@{}", remote.user, remote.host));
-        ssh_args.push("tmux list-sessions -F '#{session_name}' 2>/dev/null || true".to_string());
+        let list_cmd = "tmux list-sessions -F '#{session_name}' 2>/dev/null || true".to_string();
 
-        let str_args: Vec<&str> = ssh_args.iter().map(|s| s.as_str()).collect();
-        let output = std::process::Command::new("ssh").args(&str_args).output();
+        let output = if let Some(ref bastion_str) = remote.bastion {
+            // Bastion SSH path
+            let parts: Vec<&str> = bastion_str.splitn(3, ':').collect();
+            if parts.len() == 3 {
+                std::process::Command::new("az")
+                    .args([
+                        "network",
+                        "bastion",
+                        "ssh",
+                        "--name",
+                        parts[0],
+                        "--resource-group",
+                        parts[1],
+                        "--target-resource-id",
+                        parts[2],
+                        "--auth-type",
+                        "AAD",
+                        "--username",
+                        &remote.user,
+                        "--",
+                        "-o",
+                        "StrictHostKeyChecking=accept-new",
+                        "-o",
+                        "BatchMode=yes",
+                        &list_cmd,
+                    ])
+                    .output()
+            } else {
+                continue;
+            }
+        } else {
+            // Direct SSH path
+            let mut ssh_args = vec![
+                "-o".to_string(),
+                "StrictHostKeyChecking=accept-new".to_string(),
+                "-o".to_string(),
+                "ConnectTimeout=5".to_string(),
+                "-o".to_string(),
+                "BatchMode=yes".to_string(),
+            ];
+            if let Some(ref key) = remote.key {
+                ssh_args.push("-i".to_string());
+                ssh_args.push(key.clone());
+            } else if let Some(key_path) = resolve_ssh_key_path() {
+                ssh_args.push("-i".to_string());
+                ssh_args.push(key_path.to_string_lossy().to_string());
+            }
+            ssh_args.push("-p".to_string());
+            ssh_args.push(remote.port.to_string());
+            ssh_args.push(format!("{}@{}", remote.user, remote.host));
+            ssh_args.push(list_cmd);
+
+            let str_args: Vec<&str> = ssh_args.iter().map(|s| s.as_str()).collect();
+            std::process::Command::new("ssh").args(&str_args).output()
+        };
 
         match output {
             Ok(o) if o.status.success() => {
@@ -154,6 +252,52 @@ pub fn discover_remote_sessions_sync(resource_group: Option<&str>) -> Result<Vec
     }
 
     Ok(sessions)
+}
+
+/// Detect a bastion host in the given resource group.
+pub fn detect_bastion(resource_group: &str) -> Result<String> {
+    let output = std::process::Command::new("az")
+        .args([
+            "network",
+            "bastion",
+            "list",
+            "--resource-group",
+            resource_group,
+            "--query",
+            "[0].name",
+            "-o",
+            "tsv",
+        ])
+        .output()?;
+
+    if !output.status.success() {
+        anyhow::bail!(
+            "Failed to list bastions: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+
+    let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if name.is_empty() {
+        anyhow::bail!("No bastion found in resource group '{}'", resource_group);
+    }
+    Ok(name)
+}
+
+/// Build the full Azure resource ID for a VM.
+pub fn build_vm_resource_id(vm: &VmInfo) -> Result<String> {
+    let sub = vm
+        .subscription_id
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("VM '{}' missing subscription_id", vm.name))?;
+    let rg = vm
+        .resource_group
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("VM '{}' missing resource_group", vm.name))?;
+    Ok(format!(
+        "/subscriptions/{}/resourceGroups/{}/providers/Microsoft.Compute/virtualMachines/{}",
+        sub, rg, vm.name
+    ))
 }
 
 fn resolve_ssh_key() -> Option<String> {

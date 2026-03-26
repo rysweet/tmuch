@@ -117,7 +117,12 @@ pub fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     let focused_pos = ids.iter().position(|&id| id == focused_id);
 
     let pane_info = if let (Some(pos), Some(pane)) = (focused_pos, app.pane_manager.focused()) {
-        format!("[{}/{}] {}", pos + 1, app.pane_manager.count(), pane.name())
+        format!(
+            "\u{25b6} [{}/{}] {}",
+            pos + 1,
+            app.pane_manager.count(),
+            pane.name()
+        )
     } else {
         format!("[0/{}]", app.pane_manager.count())
     };
@@ -141,18 +146,41 @@ pub fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         Span::raw(" "),
         Span::styled(
             format!("{}{}", pane_info, maximize_indicator),
-            Style::default().fg(parse_color(&theme.status_bar.text)),
+            Style::default()
+                .fg(parse_color(&theme.status_bar.text))
+                .add_modifier(Modifier::BOLD),
         ),
     ];
 
     let left_len = (mode_str.len() + 2) + 1 + pane_info.len() + maximize_indicator.len();
-    let padding = if area.width as usize > left_len + version_len as usize {
-        area.width as usize - left_len - version_len as usize
+
+    // Busy indicator with spinner
+    let busy_span = if let Some(ref msg) = app.busy {
+        const SPINNER: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+        let frame = SPINNER[app.spinner_tick % SPINNER.len()];
+        format!(" {} {} ", frame, msg)
+    } else {
+        String::new()
+    };
+    let busy_len = busy_span.len();
+
+    let mut spans = left_spans;
+
+    if !busy_span.is_empty() {
+        spans.push(Span::styled(
+            busy_span,
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
+
+    let total_left = left_len + busy_len;
+    let padding = if area.width as usize > total_left + version_len as usize {
+        area.width as usize - total_left - version_len as usize
     } else {
         1
     };
-
-    let mut spans = left_spans;
     spans.push(Span::raw(" ".repeat(padding)));
     spans.push(Span::styled(
         version_tag,
