@@ -1,5 +1,6 @@
 """Download and execute the tmuch Rust binary from GitHub Releases."""
 
+import json
 import os
 import platform
 import shutil
@@ -12,7 +13,8 @@ import urllib.request
 from pathlib import Path
 
 GITHUB_REPO = "rysweet/tmuch"
-VERSION = "0.3.8"
+# Fallback version if API discovery fails
+FALLBACK_VERSION = "0.3.8"
 
 
 def _platform_suffix() -> str:
@@ -39,31 +41,65 @@ def _bin_dir() -> Path:
     return cache / "tmuch" / "bin"
 
 
+def _discover_latest_version() -> str:
+    """Query GitHub API for the latest release tag."""
+    # Try gh CLI first (fast, authenticated)
+    try:
+        result = subprocess.run(
+            ["gh", "api", f"repos/{GITHUB_REPO}/releases/latest", "--jq", ".tag_name"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            tag = result.stdout.strip().lstrip("v")
+            return tag
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+
+    # Fallback: GitHub API via urllib
+    try:
+        url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+        req = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json"})
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read())
+            tag = data.get("tag_name", "").lstrip("v")
+            if tag:
+                return tag
+    except Exception:
+        pass
+
+    return FALLBACK_VERSION
+
+
 def _ensure_binary() -> Path:
     """Download the tmuch binary if not already cached."""
     bin_dir = _bin_dir()
     binary = bin_dir / "tmuch"
 
-    # Check if we already have the right version
+    # Discover latest version
+    version = _discover_latest_version()
+
+    # Check if we already have a working binary (any version)
     if binary.exists():
         try:
             result = subprocess.run(
                 [str(binary), "--version"],
-                capture_output=True,
-                text=True,
-                timeout=5,
+                capture_output=True, text=True, timeout=5,
             )
-            if f"tmuch {VERSION}" in result.stdout:
-                return binary
+            if result.returncode == 0:
+                cached_ver = result.stdout.strip().split()[-1] if result.stdout.strip() else ""
+                if cached_ver == version:
+                    return binary
+                # Different version — re-download
+                print(f"Updating tmuch {cached_ver} → {version}...", file=sys.stderr)
         except (subprocess.TimeoutExpired, OSError):
             pass
 
     # Download from GitHub Releases
     suffix = _platform_suffix()
     asset_name = f"tmuch-{suffix}.tar.gz"
-    url = f"https://github.com/{GITHUB_REPO}/releases/download/v{VERSION}/{asset_name}"
+    url = f"https://github.com/{GITHUB_REPO}/releases/download/v{version}/{asset_name}"
 
-    print(f"Downloading tmuch v{VERSION} for {suffix}...", file=sys.stderr)
+    print(f"Downloading tmuch v{version} for {suffix}...", file=sys.stderr)
 
     bin_dir.mkdir(parents=True, exist_ok=True)
 
@@ -78,25 +114,18 @@ def _ensure_binary() -> Path:
             try:
                 subprocess.run(
                     [
-                        "gh",
-                        "release",
-                        "download",
-                        f"v{VERSION}",
-                        "--repo",
-                        GITHUB_REPO,
-                        "--pattern",
-                        f"*{suffix}*",
-                        "--dir",
-                        tmp,
+                        "gh", "release", "download", f"v{version}",
+                        "--repo", GITHUB_REPO,
+                        "--pattern", f"*{suffix}*",
+                        "--dir", tmp,
                     ],
-                    check=True,
-                    capture_output=True,
+                    check=True, capture_output=True,
                 )
             except (subprocess.CalledProcessError, FileNotFoundError):
                 raise RuntimeError(
                     f"Failed to download tmuch: {e}\n"
                     f"URL: {url}\n"
-                    f"Try: gh release download v{VERSION} --repo {GITHUB_REPO}"
+                    f"Try: gh release download v{version} --repo {GITHUB_REPO}"
                 ) from e
 
         # Extract
@@ -111,7 +140,7 @@ def _ensure_binary() -> Path:
                     shutil.copy2(src, binary)
                     binary.chmod(binary.stat().st_mode | stat.S_IEXEC)
                     print(
-                        f"Installed tmuch v{VERSION} to {binary}",
+                        f"Installed tmuch v{version} to {binary}",
                         file=sys.stderr,
                     )
                     return binary
