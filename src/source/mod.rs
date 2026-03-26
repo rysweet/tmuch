@@ -3,6 +3,7 @@ pub mod command;
 pub mod http;
 pub mod local_tmux;
 pub mod registry;
+pub mod settings;
 pub mod snake;
 pub mod sparkline_monitor;
 pub mod ssh_subprocess;
@@ -99,6 +100,9 @@ fn default_plugin_config() -> toml::Value {
 /// Parse a `-n` argument into a content source.
 /// Supports prefixes: `watch:cmd:interval`, `tail:path`, `clock:`, or plain tmux command.
 pub fn parse_new_arg(arg: &str) -> NewPaneRequest {
+    if arg == "settings:" || arg == "settings" {
+        return NewPaneRequest::Settings;
+    }
     if arg == "clock:" || arg == "clock" {
         return NewPaneRequest::Clock;
     }
@@ -200,4 +204,5 @@ pub enum NewPaneRequest {
     SysInfo { interval_ms: u64 },
     Snake,
     Sparkline { command: String, interval_ms: u64 },
+    Settings,
 }
