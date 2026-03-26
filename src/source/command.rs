@@ -91,3 +91,18 @@ impl ContentSource for CommandSource {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_command_source_captures_output() {
+        let mut src = CommandSource::new("echo hello".to_string(), 60_000);
+        let output = src.capture(80, 24).unwrap();
+        assert!(output.contains("hello"), "output was: {}", output);
+        assert_eq!(src.name(), "echo");
+        assert_eq!(src.source_label(), "cmd");
+        assert!(!src.is_interactive());
+    }
+}

@@ -1,5 +1,5 @@
-use crate::app::EditorInputMode;
 use crate::config::Config;
+use crate::editor_state::EditorInputMode;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 #[derive(Debug, Clone, PartialEq, Eq)]

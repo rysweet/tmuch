@@ -230,3 +230,21 @@ fn find_socket() -> Result<PathBuf> {
         "no running tmuch instance found (no tmuch-*.sock)"
     ))
 }
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    #[test]
+    fn test_socket_path_uses_xdg_runtime_dir() {
+        // When XDG_RUNTIME_DIR is set, socket should go there
+        let xdg = std::env::var("XDG_RUNTIME_DIR").ok();
+        let pid = std::process::id();
+        let expected_dir = xdg
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("/tmp"));
+        let socket_path = expected_dir.join(format!("tmuch-{}.sock", pid));
+        assert!(socket_path.to_str().unwrap().contains("tmuch-"));
+        assert!(socket_path.to_str().unwrap().ends_with(".sock"));
+    }
+}

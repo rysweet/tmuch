@@ -142,3 +142,24 @@ impl PluginRegistry {
         &self.plugins
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_registry_creates_known_plugins() {
+        let reg = PluginRegistry::new();
+        // "clock" should be a known plugin
+        let source = reg.create("clock", toml::Value::Table(toml::map::Map::new()));
+        assert!(source.is_some(), "clock plugin should be creatable");
+        // "nonexistent" should return None
+        let none = reg.create("nonexistent", toml::Value::Table(toml::map::Map::new()));
+        assert!(none.is_none(), "unknown plugin should return None");
+        // Verify the list contains expected plugins
+        let names: Vec<&str> = reg.list().iter().map(|p| p.name).collect();
+        assert!(names.contains(&"clock"));
+        assert!(names.contains(&"snake"));
+        assert!(names.contains(&"weather"));
+    }
+}

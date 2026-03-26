@@ -24,6 +24,8 @@ pub struct VmInfo {
 pub struct AzlinConfig {
     pub enabled: bool,
     pub resource_group: Option<String>,
+    /// Override the default SSH user for azlin VMs (falls back to "azureuser").
+    pub default_user: Option<String>,
 }
 
 /// Discover running Azure VMs via azlin-azure (synchronous -- uses az CLI).
@@ -58,11 +60,21 @@ pub fn discover_vms(resource_group: Option<&str>) -> Result<Vec<VmInfo>> {
 
 /// Convert a VmInfo to a RemoteConfig.
 /// Prefers public IP, falls back to private IP (works on same vnet).
+/// User resolution order: vm.admin_username -> azlin_config.default_user -> "azureuser".
 pub fn vm_to_remote_config(vm: &VmInfo) -> Result<RemoteConfig> {
+    vm_to_remote_config_with(vm, None)
+}
+
+/// Like vm_to_remote_config but accepts an optional AzlinConfig for default_user.
+pub fn vm_to_remote_config_with(
+    vm: &VmInfo,
+    azlin_config: Option<&AzlinConfig>,
+) -> Result<RemoteConfig> {
     let user = vm
         .admin_username
         .clone()
-        .unwrap_or_else(|| std::env::var("USER").unwrap_or_else(|_| "azureuser".to_string()));
+        .or_else(|| azlin_config.and_then(|c| c.default_user.clone()))
+        .unwrap_or_else(|| "azureuser".to_string());
 
     let key = resolve_ssh_key();
 
@@ -89,7 +101,7 @@ pub fn discover_remote_sessions_sync(resource_group: Option<&str>) -> Result<Vec
     let mut sessions = Vec::new();
 
     for vm in &vms {
-        let remote = match vm_to_remote_config(vm) {
+        let remote = match vm_to_remote_config_with(vm, None) {
             Ok(r) => r,
             Err(e) => {
                 eprintln!("  {}: {}", vm.name, e);

@@ -99,4 +99,22 @@ mod tests {
         // Just verify it doesn't panic
         let _ = list();
     }
+
+    #[test]
+    fn test_validate_layout_name_rejects_special_chars() {
+        // Names with embedded dots are rejected
+        assert!(validate_layout_name("a..b").is_err());
+        // But normal names with hyphens/underscores pass
+        assert!(validate_layout_name("my_layout-2").is_ok());
+    }
+
+    #[test]
+    fn test_list_returns_string_names() {
+        let names = list();
+        // All returned names should be non-empty strings (no .toml suffix)
+        for name in &names {
+            assert!(!name.is_empty());
+            assert!(!name.ends_with(".toml"));
+        }
+    }
 }
