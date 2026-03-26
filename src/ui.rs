@@ -122,106 +122,78 @@ pub fn draw(frame: &mut Frame, app: &App) {
     }
 }
 
-fn hint_separator(app: &App) -> Span<'static> {
-    Span::styled(
-        " \u{2502} ",
-        Style::default().fg(parse_color(&app.theme.hints_bar.separator)),
-    )
+fn sep() -> Span<'static> {
+    Span::styled(" \u{2502} ", Style::default().fg(Color::Rgb(50, 50, 50)))
 }
 
-fn hint_key(key: &'static str, app: &App) -> Span<'static> {
-    Span::styled(
-        key,
-        Style::default()
-            .fg(parse_color(&app.theme.hints_bar.key))
-            .add_modifier(Modifier::BOLD),
-    )
-}
-
-fn hint_label(label: &'static str, app: &App) -> Span<'static> {
-    Span::styled(
-        label,
-        Style::default().fg(parse_color(&app.theme.hints_bar.label)),
-    )
+/// Each hotkey group gets a distinct color so they're easy to scan visually.
+fn hint(key: &'static str, label: &'static str, color: Color) -> Vec<Span<'static>> {
+    vec![
+        Span::styled(key, Style::default().fg(color).add_modifier(Modifier::BOLD)),
+        Span::styled(label, Style::default().fg(Color::Rgb(120, 120, 120))),
+    ]
 }
 
 fn draw_hints_bar(frame: &mut Frame, app: &App, area: Rect) {
-    let spans = match app.mode {
+    let mut spans = vec![Span::raw(" ")];
+
+    match app.mode {
         Mode::Normal => {
-            vec![
-                Span::raw(" "),
-                hint_key("q", app),
-                hint_label(" Quit", app),
-                hint_separator(app),
-                hint_key("^A", app),
-                hint_label(" Add", app),
-                hint_separator(app),
-                hint_key("^D", app),
-                hint_label(" Drop", app),
-                hint_separator(app),
-                hint_key("^S", app),
-                hint_label(" Sessions", app),
-                hint_separator(app),
-                hint_key("^Z", app),
-                hint_label(" Azlin", app),
-                hint_separator(app),
-                hint_key("^E", app),
-                hint_label(" Edit Cmds", app),
-                hint_separator(app),
-                hint_key("Tab", app),
-                hint_label(" Next", app),
-                hint_separator(app),
-                hint_key("Enter", app),
-                hint_label(" Focus", app),
-                hint_separator(app),
-                hint_key("^V/^H", app),
-                hint_label(" Split", app),
-                hint_separator(app),
-                hint_key("F11", app),
-                hint_label(" Max", app),
-                hint_separator(app),
-                hint_key("1-9", app),
-                hint_label(" Bindings", app),
-            ]
+            // Each group in a different color for quick visual scanning
+            spans.extend(hint("q", " Quit", Color::Red));
+            spans.push(sep());
+            spans.extend(hint("^A", " Add", Color::Green));
+            spans.push(sep());
+            spans.extend(hint("^D", " Drop", Color::Red));
+            spans.push(sep());
+            spans.extend(hint("^S", " Sessions", Color::Cyan));
+            spans.push(sep());
+            spans.extend(hint("^G", " Azlin", Color::Blue));
+            spans.push(sep());
+            spans.extend(hint("^E", " Edit Cmds", Color::Magenta));
+            spans.push(sep());
+            spans.extend(hint("Tab", " Next", Color::Yellow));
+            spans.push(sep());
+            spans.extend(hint("Enter", " Focus", Color::Green));
+            spans.push(sep());
+            spans.extend(hint("^V/^H", " Split", Color::Cyan));
+            spans.push(sep());
+            spans.extend(hint("F11", " Max", Color::Yellow));
+            spans.push(sep());
+            spans.extend(hint("1-9", " Bindings", Color::Magenta));
         }
-        Mode::PaneFocused => vec![
-            Span::raw(" "),
-            hint_key("Esc", app),
-            hint_label(" Unfocus", app),
-            hint_separator(app),
-            hint_label("All keys forwarded to session", app),
-        ],
-        Mode::SessionPicker => vec![
-            Span::raw(" "),
-            hint_key("\u{2191}\u{2193}/jk", app),
-            hint_label(" Navigate", app),
-            hint_separator(app),
-            hint_key("Enter", app),
-            hint_label(" Select", app),
-            hint_separator(app),
-            hint_key("a", app),
-            hint_label(" Add All", app),
-            hint_separator(app),
-            hint_key("z", app),
-            hint_label(" Scan Azlin", app),
-            hint_separator(app),
-            hint_key("Esc", app),
-            hint_label(" Cancel", app),
-        ],
-        Mode::CommandEditor => vec![
-            Span::raw(" "),
-            hint_key("\u{2191}\u{2193}", app),
-            hint_label(" Navigate", app),
-            hint_separator(app),
-            hint_key("d", app),
-            hint_label(" Delete", app),
-            hint_separator(app),
-            hint_key("Esc", app),
-            hint_label(" Close", app),
-            hint_separator(app),
-            hint_label("Edit ~/.config/tmuch/config.toml to add bindings", app),
-        ],
-    };
+        Mode::PaneFocused => {
+            spans.extend(hint("Esc", " Unfocus", Color::Red));
+            spans.push(sep());
+            spans.push(Span::styled(
+                "All keys forwarded to session",
+                Style::default().fg(Color::Rgb(100, 100, 100)),
+            ));
+        }
+        Mode::SessionPicker => {
+            spans.extend(hint("\u{2191}\u{2193}/jk", " Nav", Color::Yellow));
+            spans.push(sep());
+            spans.extend(hint("Enter", " Select", Color::Green));
+            spans.push(sep());
+            spans.extend(hint("a", " Add All", Color::Cyan));
+            spans.push(sep());
+            spans.extend(hint("z", " Scan Azlin", Color::Blue));
+            spans.push(sep());
+            spans.extend(hint("Esc", " Cancel", Color::Red));
+        }
+        Mode::CommandEditor => {
+            spans.extend(hint("\u{2191}\u{2193}", " Nav", Color::Yellow));
+            spans.push(sep());
+            spans.extend(hint("d", " Delete", Color::Red));
+            spans.push(sep());
+            spans.extend(hint("Esc", " Close", Color::Red));
+            spans.push(sep());
+            spans.push(Span::styled(
+                "Edit ~/.config/tmuch/config.toml to add",
+                Style::default().fg(Color::Rgb(80, 80, 80)),
+            ));
+        }
+    }
 
     let line = Line::from(spans);
     let bar = Paragraph::new(line).style(Style::default().bg(parse_color(&app.theme.hints_bar.bg)));
