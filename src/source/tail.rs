@@ -35,7 +35,7 @@ impl TailSource {
             let reader = std::io::BufReader::new(stdout);
             for line in reader.lines() {
                 let Ok(line) = line else { break };
-                let mut buf = buf_clone.lock().unwrap();
+                let mut buf = buf_clone.lock().unwrap_or_else(|e| e.into_inner());
                 if buf.len() >= MAX_LINES {
                     buf.pop_front();
                 }
@@ -53,7 +53,7 @@ impl TailSource {
 
 impl ContentSource for TailSource {
     fn capture(&mut self, _width: u16, height: u16) -> Result<String> {
-        let buf = self.buffer.lock().unwrap();
+        let buf = self.buffer.lock().unwrap_or_else(|e| e.into_inner());
         let lines: Vec<&str> = buf
             .iter()
             .rev()

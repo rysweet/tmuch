@@ -187,7 +187,15 @@ fn download_and_replace(url: &str, version: &str) -> Result<()> {
         _ => {
             // New binary is broken — rollback
             eprintln!("Warning: new binary failed verification, rolling back");
-            fs::rename(&backup, &current_exe).ok();
+            if let Err(rb_err) = fs::rename(&backup, &current_exe) {
+                anyhow::bail!(
+                    "New binary failed --version check AND rollback failed: {}. \
+                     Manual recovery needed: copy {} to {}",
+                    rb_err,
+                    backup.display(),
+                    current_exe.display()
+                );
+            }
             anyhow::bail!("New binary failed --version check, rolled back to previous version");
         }
     }

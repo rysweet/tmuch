@@ -1,18 +1,26 @@
+mod action_handler;
 mod app;
 mod azlin_integration;
 mod config;
 mod consts;
+mod editor_state;
+mod event_loop;
 mod ipc;
+mod ipc_handler;
 mod keys;
 mod layout;
 mod layouts;
+mod mouse;
 mod pane;
+mod pane_ops;
 mod self_update;
 mod session_picker;
 mod source;
 mod theme;
 mod tmux;
 mod ui;
+mod ui_bars;
+mod ui_overlays;
 mod update_check;
 
 use clap::{CommandFactory, Parser, Subcommand};

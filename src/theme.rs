@@ -101,9 +101,23 @@ impl Theme {
     pub fn load() -> Self {
         let path = theme_path();
         if path.exists() {
-            if let Ok(contents) = std::fs::read_to_string(&path) {
-                if let Ok(theme) = toml::from_str(&contents) {
-                    return theme;
+            match std::fs::read_to_string(&path) {
+                Ok(contents) => match toml::from_str(&contents) {
+                    Ok(theme) => return theme,
+                    Err(e) => {
+                        eprintln!(
+                            "Warning: failed to parse {}: {}; using default theme",
+                            path.display(),
+                            e
+                        );
+                    }
+                },
+                Err(e) => {
+                    eprintln!(
+                        "Warning: failed to read {}: {}; using default theme",
+                        path.display(),
+                        e
+                    );
                 }
             }
         }

@@ -87,3 +87,19 @@ pub fn generate_session_name() -> String {
         .as_millis();
     format!("tmuch-{}", ts)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_generate_session_name_uniqueness() {
+        let a = generate_session_name();
+        // Small sleep to ensure different timestamp
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        let b = generate_session_name();
+        assert!(a.starts_with("tmuch-"));
+        assert!(b.starts_with("tmuch-"));
+        assert_ne!(a, b, "Generated names should be unique");
+    }
+}

@@ -72,7 +72,7 @@ impl SshSubprocessSource {
             let interval = Duration::from_millis(poll_interval_ms);
 
             loop {
-                if *shutdown_clone.lock().unwrap() {
+                if *shutdown_clone.lock().unwrap_or_else(|e| e.into_inner()) {
                     break;
                 }
 
@@ -87,11 +87,12 @@ impl SshSubprocessSource {
 
                 match result {
                     Ok(output) => {
-                        *content_clone.lock().unwrap() = output;
-                        *error_clone.lock().unwrap() = None;
+                        *content_clone.lock().unwrap_or_else(|e| e.into_inner()) = output;
+                        *error_clone.lock().unwrap_or_else(|e| e.into_inner()) = None;
                     }
                     Err(e) => {
-                        *error_clone.lock().unwrap() = Some(format!("{}", e));
+                        *error_clone.lock().unwrap_or_else(|e| e.into_inner()) =
+                            Some(format!("{}", e));
                     }
                 }
 
@@ -178,10 +179,19 @@ pub fn list_remote_sessions(remote: &RemoteConfig) -> Result<Vec<String>> {
 
 impl ContentSource for SshSubprocessSource {
     fn capture(&mut self, _width: u16, _height: u16) -> Result<String> {
-        if let Some(err) = self.error.lock().unwrap().as_ref() {
+        if let Some(err) = self
+            .error
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+        {
             return Ok(format!("[{}]\n\n{}\n\nRetrying...", self.display_name, err));
         }
-        Ok(self.latest_content.lock().unwrap().clone())
+        Ok(self
+            .latest_content
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone())
     }
 
     fn send_keys(&mut self, keys: &str) -> Result<()> {
@@ -215,7 +225,7 @@ impl ContentSource for SshSubprocessSource {
     }
 
     fn cleanup(&mut self) {
-        *self.shutdown.lock().unwrap() = true;
+        *self.shutdown.lock().unwrap_or_else(|e| e.into_inner()) = true;
 
         // Restore remote window to automatic size
         let cmd = format!(

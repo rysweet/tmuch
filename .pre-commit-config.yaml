@@ -33,3 +33,12 @@ repos:
         types: [rust]
         pass_filenames: false
         stages: [pre-push]
+
+      - id: cargo-coverage
+        name: cargo coverage check
+        entry: bash -c 'cargo llvm-cov --summary-only 2>&1 | tail -1 | awk "{print \"Coverage: \" \$10}"'
+        language: system
+        types: [rust]
+        pass_filenames: false
+        stages: [pre-push]
+        verbose: true
