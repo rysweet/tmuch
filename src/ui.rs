@@ -13,16 +13,15 @@ use ratatui::Frame;
 pub fn draw(frame: &mut Frame, app: &App) {
     let size = frame.area();
 
-    // Line 1 (TOP): key hints bar
+    // Layout: hints (1) + panes (N-3) + log line (1) + status bar (1)
     let hints_area = Rect::new(size.x, size.y, size.width, 1);
-    // Lines 2..N-1: pane grid
     let main_area = Rect::new(
         size.x,
         size.y + 1,
         size.width,
-        size.height.saturating_sub(2),
+        size.height.saturating_sub(3),
     );
-    // Line N (BOTTOM): status bar
+    let log_area = Rect::new(size.x, size.height.saturating_sub(2), size.width, 1);
     let status_area = Rect::new(size.x, size.height.saturating_sub(1), size.width, 1);
 
     // Draw hints bar
@@ -130,6 +129,9 @@ pub fn draw(frame: &mut Frame, app: &App) {
         }
     }
 
+    // Draw activity log line
+    draw_log_line(frame, app, log_area);
+
     // Draw status bar
     draw_status_bar(frame, app, status_area);
 
@@ -143,6 +145,33 @@ pub fn draw(frame: &mut Frame, app: &App) {
     if app.mode == Mode::AppLauncher {
         draw_app_launcher(frame, app, main_area);
     }
+}
+
+fn draw_log_line(frame: &mut Frame, app: &App, area: Rect) {
+    use crate::source::debug_log;
+
+    let last_msg = debug_log::last_message().unwrap_or_default();
+    let display = if last_msg.is_empty() {
+        if let Some(ref busy) = app.busy {
+            const SPINNER: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+            let frame_char = SPINNER[app.spinner_tick % SPINNER.len()];
+            format!(" {} {}", frame_char, busy)
+        } else {
+            " Ready".to_string()
+        }
+    } else {
+        format!(" {}", last_msg)
+    };
+
+    let style = if app.busy.is_some() {
+        Style::default().fg(Color::Yellow)
+    } else {
+        Style::default().fg(Color::Rgb(80, 80, 80))
+    };
+
+    let line = Line::from(Span::styled(display, style));
+    let bar = Paragraph::new(line).style(Style::default().bg(Color::Rgb(15, 15, 15)));
+    frame.render_widget(bar, area);
 }
 
 #[cfg(test)]

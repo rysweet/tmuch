@@ -253,6 +253,38 @@ pub fn handle_action(app: &mut App, action: Action) -> Result<()> {
             app.app_launcher = None;
             app.mode = Mode::Normal;
         }
+        Action::HintNext => {
+            let count = crate::ui_bars::NORMAL_HINT_COUNT;
+            app.selected_hint = (app.selected_hint + 1) % count;
+        }
+        Action::HintPrev => {
+            let count = crate::ui_bars::NORMAL_HINT_COUNT;
+            app.selected_hint = if app.selected_hint == 0 {
+                count - 1
+            } else {
+                app.selected_hint - 1
+            };
+        }
+        Action::HintActivate => {
+            // Activate the currently selected hint tab
+            let action = match app.selected_hint {
+                0 => Some(Action::Quit),
+                1 => Some(Action::AddPane),
+                2 => Some(Action::DropPane),
+                3 => Some(Action::OpenSessionPicker),
+                4 => Some(Action::DiscoverAzlin),
+                5 => Some(Action::OpenSettings),
+                6 => Some(Action::OpenAppLauncher),
+                7 => Some(Action::FocusNext),
+                8 => Some(Action::EnterPaneMode),
+                9 => Some(Action::SplitVertical),
+                10 => Some(Action::ToggleMaximize),
+                _ => None,
+            };
+            if let Some(a) = action {
+                return handle_action(app, a);
+            }
+        }
     }
     Ok(())
 }

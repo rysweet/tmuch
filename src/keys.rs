@@ -51,6 +51,9 @@ pub enum Action {
     LauncherDown,
     LauncherConfirm,
     LauncherCancel,
+    HintNext,
+    HintPrev,
+    HintActivate,
 }
 
 pub fn handle(
@@ -90,12 +93,14 @@ fn handle_normal(event: KeyEvent, config: &Config) -> Option<Action> {
     match event.code {
         KeyCode::Tab => Some(Action::FocusNext),
         KeyCode::BackTab => Some(Action::FocusPrev),
-        KeyCode::Enter => Some(Action::EnterPaneMode),
+        KeyCode::Enter => Some(Action::HintActivate),
         KeyCode::Char('q') => Some(Action::Quit),
         KeyCode::F(11) => Some(Action::ToggleMaximize),
-        // Arrow keys for pane navigation
-        KeyCode::Down | KeyCode::Right => Some(Action::FocusNext),
-        KeyCode::Up | KeyCode::Left => Some(Action::FocusPrev),
+        // Left/Right navigate menu tabs, Up/Down navigate panes
+        KeyCode::Right => Some(Action::HintNext),
+        KeyCode::Left => Some(Action::HintPrev),
+        KeyCode::Down => Some(Action::FocusNext),
+        KeyCode::Up => Some(Action::FocusPrev),
         KeyCode::Char(c) => {
             // Check command bindings
             config
@@ -370,7 +375,7 @@ mod tests {
             &default_config(),
             &EditorInputMode::Browse,
         );
-        assert!(matches!(action, Some(Action::EnterPaneMode)));
+        assert!(matches!(action, Some(Action::HintActivate)));
     }
 
     #[test]
@@ -388,7 +393,7 @@ mod tests {
             &default_config(),
             &EditorInputMode::Browse,
         );
-        assert!(matches!(a, Some(Action::FocusNext)));
+        assert!(matches!(a, Some(Action::HintNext)));
         let a = handle(
             key(KeyCode::Up),
             &Mode::Normal,
@@ -402,7 +407,7 @@ mod tests {
             &default_config(),
             &EditorInputMode::Browse,
         );
-        assert!(matches!(a, Some(Action::FocusPrev)));
+        assert!(matches!(a, Some(Action::HintPrev)));
     }
 
     #[test]
