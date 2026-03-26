@@ -90,3 +90,54 @@ impl ContentSource for HttpSource {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_http_display_name() {
+        let s = HttpSource::new("http://example.com/api/health".into(), 5000);
+        assert_eq!(s.display_name, "example.com");
+        assert_eq!(s.name(), "example.com");
+    }
+
+    #[test]
+    fn test_http_display_name_https() {
+        let s = HttpSource::new("https://api.example.com/v1".into(), 5000);
+        assert_eq!(s.display_name, "api.example.com");
+    }
+
+    #[test]
+    fn test_http_metadata() {
+        let s = HttpSource::new("http://localhost".into(), 3000);
+        assert_eq!(s.source_label(), "http");
+        assert!(!s.is_interactive());
+        assert!(!s.has_custom_render());
+    }
+
+    #[test]
+    fn test_http_to_spec() {
+        let s = HttpSource::new("http://example.com".into(), 5000);
+        let spec = s.to_spec();
+        match spec {
+            PaneSpec::Http { url, interval_ms } => {
+                assert_eq!(url, "http://example.com");
+                assert_eq!(interval_ms, 5000);
+            }
+            _ => panic!("expected Http spec"),
+        }
+    }
+
+    #[test]
+    fn test_http_send_keys_noop() {
+        let mut s = HttpSource::new("http://x".into(), 5000);
+        assert!(s.send_keys("a").is_ok());
+    }
+
+    #[test]
+    fn test_http_should_refresh_initially() {
+        let s = HttpSource::new("http://x".into(), 5000);
+        assert!(s.should_refresh());
+    }
+}

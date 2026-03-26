@@ -124,3 +124,175 @@ pub fn draw(frame: &mut Frame, app: &App) {
         draw_app_launcher(frame, app, main_area);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+    use crate::source::{ContentSource, PaneSpec};
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    struct MockSource(String);
+
+    impl ContentSource for MockSource {
+        fn capture(&mut self, _w: u16, _h: u16) -> anyhow::Result<String> {
+            Ok("mock content".into())
+        }
+        fn send_keys(&mut self, _keys: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn name(&self) -> &str {
+            &self.0
+        }
+        fn source_label(&self) -> &str {
+            "mock"
+        }
+        fn is_interactive(&self) -> bool {
+            false
+        }
+        fn to_spec(&self) -> PaneSpec {
+            PaneSpec::Command {
+                command: "mock".into(),
+                interval_ms: 1000,
+            }
+        }
+    }
+
+    #[test]
+    fn test_draw_empty_app() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let app = App::new(Config::default());
+        terminal.draw(|frame| draw(frame, &app)).unwrap();
+    }
+
+    #[test]
+    fn test_draw_with_panes() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new(Config::default());
+        app.pane_manager.add(Box::new(MockSource("pane-a".into())));
+        app.pane_manager.add(Box::new(MockSource("pane-b".into())));
+        terminal.draw(|frame| draw(frame, &app)).unwrap();
+    }
+
+    #[test]
+    fn test_draw_focused_mode() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new(Config::default());
+        app.pane_manager.add(Box::new(MockSource("pane-a".into())));
+        app.mode = Mode::PaneFocused;
+        terminal.draw(|frame| draw(frame, &app)).unwrap();
+    }
+
+    #[test]
+    fn test_draw_session_picker_mode() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new(Config::default());
+        app.pane_manager.add(Box::new(MockSource("pane-a".into())));
+        app.mode = Mode::SessionPicker;
+        app.picker.sessions.push(crate::tmux::SessionInfo {
+            name: "test-session".into(),
+            attached: false,
+            host: None,
+        });
+        terminal.draw(|frame| draw(frame, &app)).unwrap();
+    }
+
+    #[test]
+    fn test_draw_command_editor_mode() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new(Config::default());
+        app.mode = Mode::CommandEditor;
+        app.command_editor = Some(crate::editor_state::CommandEditorState {
+            entries: vec![('1', "top".into())],
+            selected: 0,
+            input_mode: crate::editor_state::EditorInputMode::Browse,
+            input_buffer: String::new(),
+            pending_key: None,
+        });
+        terminal.draw(|frame| draw(frame, &app)).unwrap();
+    }
+
+    #[test]
+    fn test_draw_app_launcher_mode() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new(Config::default());
+        app.mode = Mode::AppLauncher;
+        app.app_launcher = Some(crate::editor_state::AppLauncherState {
+            apps: vec![("clock", "Live clock", "clock:")],
+            selected: 0,
+        });
+        terminal.draw(|frame| draw(frame, &app)).unwrap();
+    }
+
+    #[test]
+    fn test_draw_maximized_pane() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new(Config::default());
+        let id = app.pane_manager.add(Box::new(MockSource("pane-a".into())));
+        app.pane_manager.add(Box::new(MockSource("pane-b".into())));
+        app.pane_manager.maximized = Some(id);
+        terminal.draw(|frame| draw(frame, &app)).unwrap();
+    }
+
+    #[test]
+    fn test_draw_remote_label() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        struct RemoteMock;
+        impl ContentSource for RemoteMock {
+            fn capture(&mut self, _w: u16, _h: u16) -> anyhow::Result<String> {
+                Ok("remote content".into())
+            }
+            fn send_keys(&mut self, _keys: &str) -> anyhow::Result<()> {
+                Ok(())
+            }
+            fn name(&self) -> &str {
+                "vm:session"
+            }
+            fn source_label(&self) -> &str {
+                "ssh:vm"
+            }
+            fn is_interactive(&self) -> bool {
+                true
+            }
+            fn to_spec(&self) -> PaneSpec {
+                PaneSpec::Remote {
+                    remote_name: "vm".into(),
+                    session: "session".into(),
+                }
+            }
+        }
+
+        let mut app = App::new(Config::default());
+        app.pane_manager.add(Box::new(RemoteMock));
+        terminal.draw(|frame| draw(frame, &app)).unwrap();
+    }
+
+    #[test]
+    fn test_draw_small_terminal() {
+        let backend = TestBackend::new(20, 5);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new(Config::default());
+        app.pane_manager.add(Box::new(MockSource("x".into())));
+        terminal.draw(|frame| draw(frame, &app)).unwrap();
+    }
+
+    #[test]
+    fn test_draw_custom_widget_pane() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new(Config::default());
+        app.pane_manager
+            .add(Box::new(crate::source::clock::ClockSource));
+        terminal.draw(|frame| draw(frame, &app)).unwrap();
+    }
+}

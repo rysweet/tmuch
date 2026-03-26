@@ -291,3 +291,135 @@ impl ContentSource for WeatherSource {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::buffer::Buffer;
+
+    #[test]
+    fn test_weather_new() {
+        let w = WeatherSource::new("London".into(), 300_000);
+        assert_eq!(w.city, "London");
+        assert!(w.temperature_c.is_none());
+        assert!(w.should_refresh()); // never run yet
+    }
+
+    #[test]
+    fn test_weather_metadata() {
+        let w = WeatherSource::new("Paris".into(), 60_000);
+        assert_eq!(w.name(), "Paris");
+        assert_eq!(w.source_label(), "weather");
+        assert!(!w.is_interactive());
+        assert!(w.has_custom_render());
+    }
+
+    #[test]
+    fn test_weather_parse_valid_json() {
+        let mut w = WeatherSource::new("Test".into(), 300_000);
+        let json = r#"{
+            "current_condition": [{
+                "temp_C": "22",
+                "weatherDesc": [{"value": "Sunny"}],
+                "humidity": "55",
+                "windspeedKmph": "12",
+                "FeelsLikeC": "20"
+            }]
+        }"#;
+        w.parse_weather(json);
+        assert!(w.error.is_none());
+        assert_eq!(w.temperature_c, Some(22.0));
+        assert_eq!(w.condition, "Sunny");
+        assert_eq!(w.humidity, "55");
+        assert_eq!(w.wind_speed, "12");
+        assert_eq!(w.feels_like, "20");
+    }
+
+    #[test]
+    fn test_weather_parse_invalid_json() {
+        let mut w = WeatherSource::new("Test".into(), 300_000);
+        w.parse_weather("not json");
+        assert!(w.error.is_some());
+    }
+
+    #[test]
+    fn test_weather_parse_missing_condition() {
+        let mut w = WeatherSource::new("Test".into(), 300_000);
+        w.parse_weather(r#"{"other": "data"}"#);
+        assert!(w.error.is_some());
+    }
+
+    #[test]
+    fn test_temp_color() {
+        assert_eq!(WeatherSource::temp_color(-5.0), Color::Blue);
+        assert_eq!(WeatherSource::temp_color(10.0), Color::Green);
+        assert_eq!(WeatherSource::temp_color(25.0), Color::Yellow);
+        assert_eq!(WeatherSource::temp_color(35.0), Color::Red);
+    }
+
+    #[test]
+    fn test_weather_symbol() {
+        assert_eq!(WeatherSource::weather_symbol("Sunny"), "\u{2600}");
+        assert_eq!(WeatherSource::weather_symbol("Cloudy"), "\u{2601}");
+        assert_eq!(WeatherSource::weather_symbol("Light Rain"), "\u{1f327}");
+        assert_eq!(WeatherSource::weather_symbol("Snow"), "\u{2744}");
+        assert_eq!(WeatherSource::weather_symbol("Fog"), "\u{1f32b}");
+        assert_eq!(WeatherSource::weather_symbol("Thunder"), "\u{26c8}");
+        assert_eq!(WeatherSource::weather_symbol("Unknown"), "\u{2601}"); // default
+    }
+
+    #[test]
+    fn test_weather_render_no_panic() {
+        let w = WeatherSource::new("TestCity".into(), 300_000);
+        let area = Rect::new(0, 0, 40, 15);
+        let mut buf = Buffer::empty(area);
+        w.render(area, &mut buf);
+    }
+
+    #[test]
+    fn test_weather_render_with_data() {
+        let mut w = WeatherSource::new("London".into(), 300_000);
+        w.temperature_c = Some(20.0);
+        w.condition = "Sunny".into();
+        w.humidity = "50".into();
+        w.wind_speed = "10".into();
+        w.feels_like = "18".into();
+        w.last_updated = "12:00:00".into();
+        let area = Rect::new(0, 0, 40, 15);
+        let mut buf = Buffer::empty(area);
+        w.render(area, &mut buf);
+    }
+
+    #[test]
+    fn test_weather_render_with_error() {
+        let mut w = WeatherSource::new("Bad".into(), 300_000);
+        w.error = Some("fetch failed".into());
+        let area = Rect::new(0, 0, 40, 15);
+        let mut buf = Buffer::empty(area);
+        w.render(area, &mut buf);
+    }
+
+    #[test]
+    fn test_weather_render_small_area() {
+        let w = WeatherSource::new("X".into(), 300_000);
+        let area = Rect::new(0, 0, 5, 2);
+        let mut buf = Buffer::empty(area);
+        w.render(area, &mut buf);
+    }
+
+    #[test]
+    fn test_weather_to_spec() {
+        let w = WeatherSource::new("Seattle".into(), 60_000);
+        let spec = w.to_spec();
+        match spec {
+            PaneSpec::Plugin { plugin_name, .. } => assert_eq!(plugin_name, "weather"),
+            _ => panic!("expected Plugin spec"),
+        }
+    }
+
+    #[test]
+    fn test_weather_send_keys_noop() {
+        let mut w = WeatherSource::new("X".into(), 300_000);
+        assert!(w.send_keys("a").is_ok());
+    }
+}

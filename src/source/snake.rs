@@ -7,7 +7,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget};
 use std::time::{Duration, Instant};
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 enum Direction {
     Up,
     Down,
@@ -308,5 +308,127 @@ impl ContentSource for SnakeSource {
                 Widget::render(para, Rect::new(area.x, mid_y, area.width, 1), buf);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::buffer::Buffer;
+
+    #[test]
+    fn test_snake_new() {
+        let snake = SnakeSource::new();
+        assert_eq!(snake.score, 0);
+        assert!(!snake.game_over);
+        assert_eq!(snake.body.len(), 3);
+    }
+
+    #[test]
+    fn test_snake_direction_change() {
+        let mut snake = SnakeSource::new();
+        // Moving right by default; should not reverse to left
+        snake.send_keys("Left").unwrap();
+        assert_eq!(snake.direction, Direction::Right);
+        // Can go up
+        snake.send_keys("Up").unwrap();
+        assert_eq!(snake.direction, Direction::Up);
+        // Can't reverse to down
+        snake.send_keys("Down").unwrap();
+        assert_eq!(snake.direction, Direction::Up);
+    }
+
+    #[test]
+    fn test_snake_tick_moves() {
+        let mut snake = SnakeSource::new();
+        let old_head = snake.body[0];
+        snake.tick();
+        let new_head = snake.body[0];
+        // Moving right, x should increase
+        assert_eq!(new_head.x, old_head.x + 1);
+        assert_eq!(new_head.y, old_head.y);
+    }
+
+    #[test]
+    fn test_snake_wall_collision() {
+        let mut snake = SnakeSource::new();
+        // Move right until hitting wall
+        for _ in 0..50 {
+            snake.tick();
+            if snake.game_over {
+                break;
+            }
+        }
+        assert!(snake.game_over);
+    }
+
+    #[test]
+    fn test_snake_restart() {
+        let mut snake = SnakeSource::new();
+        snake.game_over = true;
+        snake.score = 10;
+        snake.restart();
+        assert!(!snake.game_over);
+        assert_eq!(snake.score, 0);
+        assert_eq!(snake.body.len(), 3);
+    }
+
+    #[test]
+    fn test_snake_enter_restarts_on_game_over() {
+        let mut snake = SnakeSource::new();
+        snake.game_over = true;
+        snake.score = 5;
+        snake.send_keys("Enter").unwrap();
+        assert!(!snake.game_over);
+        assert_eq!(snake.score, 0);
+    }
+
+    #[test]
+    fn test_snake_metadata() {
+        let snake = SnakeSource::new();
+        assert_eq!(snake.name(), "snake");
+        assert_eq!(snake.source_label(), "game");
+        assert!(snake.is_interactive());
+        assert!(snake.has_custom_render());
+    }
+
+    #[test]
+    fn test_snake_capture() {
+        let mut snake = SnakeSource::new();
+        let output = snake.capture(30, 15).unwrap();
+        assert!(output.contains("Snake"));
+    }
+
+    #[test]
+    fn test_snake_render_no_panic() {
+        let snake = SnakeSource::new();
+        let area = Rect::new(0, 0, 30, 15);
+        let mut buf = Buffer::empty(area);
+        snake.render(area, &mut buf);
+    }
+
+    #[test]
+    fn test_snake_render_small_area() {
+        let snake = SnakeSource::new();
+        let area = Rect::new(0, 0, 3, 2);
+        let mut buf = Buffer::empty(area);
+        // Should not panic
+        snake.render(area, &mut buf);
+    }
+
+    #[test]
+    fn test_snake_to_spec() {
+        let snake = SnakeSource::new();
+        let spec = snake.to_spec();
+        match spec {
+            PaneSpec::Plugin { plugin_name, .. } => assert_eq!(plugin_name, "snake"),
+            _ => panic!("expected Plugin spec"),
+        }
+    }
+
+    #[test]
+    fn test_snake_unknown_key_ignored() {
+        let mut snake = SnakeSource::new();
+        assert!(snake.send_keys("x").is_ok());
     }
 }

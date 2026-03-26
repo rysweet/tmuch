@@ -3,6 +3,9 @@
 //! Uses the system `ssh` command instead of russh, which supports
 //! all auth methods (SSH agent, AAD, keys) without requiring an
 //! explicit key file. Background thread captures tmux pane content.
+//!
+//! An SSH ControlMaster connection is established once per remote host
+//! and reused for all subsequent commands (capture, send-keys, cleanup).
 
 use super::{ContentSource, PaneSpec};
 use anyhow::Result;
@@ -34,6 +37,85 @@ fn default_poll() -> u64 {
     500
 }
 
+/// Build the ControlPath string for a given user@host:port.
+fn control_path(user: &str, host: &str, port: u16) -> String {
+    format!("/tmp/tmuch-ssh-{}@{}:{}", user, host, port)
+}
+
+/// Establish (or reuse) an SSH ControlMaster connection.
+/// The `-f` flag backgrounds it after authentication so the call returns quickly.
+fn establish_control_master(host: &str, user: &str, port: u16) {
+    let cp = control_path(user, host, port);
+
+    // Check if the master is already alive
+    let check = std::process::Command::new("ssh")
+        .args([
+            "-o",
+            &format!("ControlPath={}", cp),
+            "-O",
+            "check",
+            &format!("{}@{}", user, host),
+        ])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+
+    if let Ok(status) = check {
+        if status.success() {
+            return; // master already running
+        }
+    }
+
+    let mut args = vec![
+        "-o".to_string(),
+        "ControlMaster=auto".to_string(),
+        "-o".to_string(),
+        format!("ControlPath={}", cp),
+        "-o".to_string(),
+        "ControlPersist=600".to_string(),
+        "-o".to_string(),
+        "StrictHostKeyChecking=accept-new".to_string(),
+        "-o".to_string(),
+        "ConnectTimeout=10".to_string(),
+        "-o".to_string(),
+        "BatchMode=yes".to_string(),
+        "-N".to_string(), // no remote command
+        "-f".to_string(), // background after auth
+        "-p".to_string(),
+        port.to_string(),
+    ];
+
+    if let Some(key) = find_ssh_key() {
+        args.push("-i".to_string());
+        args.push(key);
+    }
+
+    args.push(format!("{}@{}", user, host));
+
+    let str_args: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+    let _ = std::process::Command::new("ssh")
+        .args(&str_args)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+}
+
+/// Tear down an SSH ControlMaster connection.
+fn teardown_control_master(host: &str, user: &str, port: u16) {
+    let cp = control_path(user, host, port);
+    let _ = std::process::Command::new("ssh")
+        .args([
+            "-o",
+            &format!("ControlPath={}", cp),
+            "-O",
+            "exit",
+            &format!("{}@{}", user, host),
+        ])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+}
+
 pub struct SshSubprocessSource {
     host: String,
     user: String,
@@ -61,6 +143,9 @@ impl SshSubprocessSource {
         let display_name = format!("{}:{}", name, session);
         let label = format!("ssh:{}", name);
 
+        // Establish persistent ControlMaster connection
+        establish_control_master(&host, &user, port);
+
         let content_clone = Arc::clone(&latest_content);
         let error_clone = Arc::clone(&error);
         let shutdown_clone = Arc::clone(&shutdown);
@@ -76,7 +161,7 @@ impl SshSubprocessSource {
                     break;
                 }
 
-                // Capture without resizing — resizing remote windows causes
+                // Capture without resizing -- resizing remote windows causes
                 // them to stay tiny after tmuch exits (issue #14)
                 let cmd = format!(
                     "tmux capture-pane -p -e -t {} 2>/dev/null || echo '[session not found]'",
@@ -126,7 +211,11 @@ fn find_ssh_key() -> Option<String> {
 }
 
 fn run_ssh_command(host: &str, user: &str, port: u16, command: &str) -> Result<String> {
+    let cp = control_path(user, host, port);
+
     let mut args = vec![
+        "-o".to_string(),
+        format!("ControlPath={}", cp),
         "-o".to_string(),
         "StrictHostKeyChecking=accept-new".to_string(),
         "-o".to_string(),
@@ -156,7 +245,7 @@ fn run_ssh_command(host: &str, user: &str, port: u16, command: &str) -> Result<S
     }
 }
 
-fn shell_escape(s: &str) -> String {
+pub(crate) fn shell_escape(s: &str) -> String {
     if s.chars()
         .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
     {
@@ -233,6 +322,9 @@ impl ContentSource for SshSubprocessSource {
             shell_escape(&self.session)
         );
         let _ = run_ssh_command(&self.host, &self.user, self.port, &cmd);
+
+        // Tear down the ControlMaster connection
+        teardown_control_master(&self.host, &self.user, self.port);
     }
 
     fn to_spec(&self) -> PaneSpec {
@@ -240,5 +332,67 @@ impl ContentSource for SshSubprocessSource {
             remote_name: self.display_name.clone(),
             session: self.session.clone(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_shell_escape_simple() {
+        assert_eq!(shell_escape("hello"), "hello");
+        assert_eq!(shell_escape("my-session"), "my-session");
+        assert_eq!(shell_escape("test_name"), "test_name");
+    }
+
+    #[test]
+    fn test_shell_escape_special() {
+        assert_eq!(shell_escape("hello world"), "'hello world'");
+        assert_eq!(shell_escape("it's"), "'it'\\''s'");
+        assert_eq!(shell_escape("a;b"), "'a;b'");
+    }
+
+    #[test]
+    fn test_control_path() {
+        let cp = control_path("user", "host.example.com", 22);
+        assert_eq!(cp, "/tmp/tmuch-ssh-user@host.example.com:22");
+    }
+
+    #[test]
+    fn test_control_path_custom_port() {
+        let cp = control_path("admin", "10.0.0.1", 2222);
+        assert_eq!(cp, "/tmp/tmuch-ssh-admin@10.0.0.1:2222");
+    }
+
+    #[test]
+    fn test_default_user() {
+        let u = default_user();
+        assert!(!u.is_empty());
+    }
+
+    #[test]
+    fn test_default_port() {
+        assert_eq!(default_port(), 22);
+    }
+
+    #[test]
+    fn test_default_poll() {
+        assert_eq!(default_poll(), 500);
+    }
+
+    #[test]
+    fn test_remote_config_defaults() {
+        let config = RemoteConfig {
+            name: "test".into(),
+            host: "example.com".into(),
+            user: default_user(),
+            key: None,
+            port: default_port(),
+            poll_interval_ms: default_poll(),
+        };
+        assert_eq!(config.port, 22);
+        assert_eq!(config.poll_interval_ms, 500);
+        assert!(config.key.is_none());
     }
 }

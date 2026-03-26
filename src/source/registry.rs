@@ -162,4 +162,59 @@ mod tests {
         assert!(names.contains(&"snake"));
         assert!(names.contains(&"weather"));
     }
+
+    #[test]
+    fn test_registry_creates_all_plugins() {
+        let reg = PluginRegistry::new();
+        let empty_config = toml::Value::Table(toml::map::Map::new());
+        for info in reg.list() {
+            let source = reg.create(info.name, empty_config.clone());
+            assert!(
+                source.is_some(),
+                "plugin '{}' should be creatable",
+                info.name
+            );
+        }
+    }
+
+    #[test]
+    fn test_registry_list_has_descriptions() {
+        let reg = PluginRegistry::new();
+        for info in reg.list() {
+            assert!(!info.name.is_empty());
+            assert!(!info.description.is_empty());
+            assert!(!info.usage.is_empty());
+        }
+    }
+
+    #[test]
+    fn test_registry_weather_with_config() {
+        let reg = PluginRegistry::new();
+        let mut config = toml::map::Map::new();
+        config.insert("city".into(), toml::Value::String("Tokyo".into()));
+        config.insert("interval_ms".into(), toml::Value::Integer(60000));
+        let source = reg.create("weather", toml::Value::Table(config));
+        assert!(source.is_some());
+        let source = source.unwrap();
+        assert_eq!(source.name(), "Tokyo");
+    }
+
+    #[test]
+    fn test_registry_sysinfo_with_config() {
+        let reg = PluginRegistry::new();
+        let mut config = toml::map::Map::new();
+        config.insert("interval_ms".into(), toml::Value::Integer(5000));
+        let source = reg.create("sysinfo", toml::Value::Table(config));
+        assert!(source.is_some());
+    }
+
+    #[test]
+    fn test_registry_sparkline_with_config() {
+        let reg = PluginRegistry::new();
+        let mut config = toml::map::Map::new();
+        config.insert("command".into(), toml::Value::String("echo 42".into()));
+        config.insert("interval_ms".into(), toml::Value::Integer(1000));
+        let source = reg.create("sparkline", toml::Value::Table(config));
+        assert!(source.is_some());
+    }
 }

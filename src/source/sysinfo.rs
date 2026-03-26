@@ -286,3 +286,122 @@ impl ContentSource for SysInfoSource {
         Widget::render(up_para, chunks[5], buf);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::buffer::Buffer;
+
+    #[test]
+    fn test_sysinfo_new() {
+        let s = SysInfoSource::new(2000);
+        assert_eq!(s.cpu_percent, 0.0);
+        assert!(s.should_refresh());
+    }
+
+    #[test]
+    fn test_sysinfo_metadata() {
+        let s = SysInfoSource::new(2000);
+        assert_eq!(s.name(), "sysinfo");
+        assert_eq!(s.source_label(), "widget");
+        assert!(!s.is_interactive());
+        assert!(s.has_custom_render());
+    }
+
+    #[test]
+    fn test_gauge_color() {
+        assert_eq!(SysInfoSource::gauge_color(30.0), Color::Green);
+        assert_eq!(SysInfoSource::gauge_color(60.0), Color::Yellow);
+        assert_eq!(SysInfoSource::gauge_color(90.0), Color::Red);
+    }
+
+    #[test]
+    fn test_sysinfo_capture() {
+        let mut s = SysInfoSource::new(60_000);
+        // Force no refresh by setting last_run recently
+        s.last_run = Some(Instant::now());
+        let output = s.capture(80, 24).unwrap();
+        assert!(output.contains("CPU"));
+    }
+
+    #[test]
+    fn test_sysinfo_render_no_panic() {
+        let s = SysInfoSource::new(60_000);
+        let area = Rect::new(0, 0, 40, 12);
+        let mut buf = Buffer::empty(area);
+        s.render(area, &mut buf);
+    }
+
+    #[test]
+    fn test_sysinfo_render_small_area() {
+        let s = SysInfoSource::new(60_000);
+        let area = Rect::new(0, 0, 10, 3);
+        let mut buf = Buffer::empty(area);
+        s.render(area, &mut buf);
+    }
+
+    #[test]
+    fn test_sysinfo_render_with_data() {
+        let mut s = SysInfoSource::new(60_000);
+        s.cpu_percent = 45.0;
+        s.mem_used_gb = 4.0;
+        s.mem_total_gb = 8.0;
+        s.disk_used_pct = 60.0;
+        s.disk_label = "30G / 50G".into();
+        s.load_avg = "1.5 2.0 1.8".into();
+        s.uptime = "5d 3h 20m".into();
+        let area = Rect::new(0, 0, 50, 14);
+        let mut buf = Buffer::empty(area);
+        s.render(area, &mut buf);
+    }
+
+    #[test]
+    fn test_sysinfo_to_spec() {
+        let s = SysInfoSource::new(3000);
+        let spec = s.to_spec();
+        match spec {
+            PaneSpec::Plugin { plugin_name, .. } => assert_eq!(plugin_name, "sysinfo"),
+            _ => panic!("expected Plugin spec"),
+        }
+    }
+
+    #[test]
+    fn test_sysinfo_send_keys_noop() {
+        let mut s = SysInfoSource::new(2000);
+        assert!(s.send_keys("a").is_ok());
+    }
+
+    #[test]
+    fn test_sysinfo_refresh_reads_system_data() {
+        let mut s = SysInfoSource::new(2000);
+        s.refresh();
+        // On Linux, these should be populated
+        assert!(s.mem_total_gb > 0.0, "mem_total should be > 0");
+        assert!(!s.load_avg.is_empty(), "load_avg should be populated");
+        assert!(!s.uptime.is_empty(), "uptime should be populated");
+    }
+
+    #[test]
+    fn test_sysinfo_cpu_requires_two_readings() {
+        let mut s = SysInfoSource::new(2000);
+        s.read_cpu();
+        // First reading, no delta yet
+        assert_eq!(s.cpu_percent, 0.0);
+        assert!(s.prev_cpu_total > 0);
+        // Second reading should compute a delta
+        s.read_cpu();
+        // cpu_percent could be 0.0 if no time passed, but prev values should be updated
+        assert!(s.prev_cpu_total > 0);
+    }
+
+    #[test]
+    fn test_sysinfo_capture_with_refresh() {
+        let mut s = SysInfoSource::new(2000);
+        // First capture triggers refresh
+        let output = s.capture(80, 24).unwrap();
+        assert!(output.contains("CPU"));
+        assert!(output.contains("Mem"));
+        assert!(output.contains("Disk"));
+        assert!(output.contains("Load"));
+    }
+}

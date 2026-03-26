@@ -105,6 +105,23 @@ impl SettingsSource {
     }
 }
 
+impl SettingsSource {
+    #[cfg(test)]
+    fn new_test() -> Self {
+        use std::collections::HashMap;
+        let mut bindings = HashMap::new();
+        bindings.insert('1', "top".to_string());
+        bindings.insert('2', "htop".to_string());
+        Self::new(
+            &bindings,
+            &[("dev".into(), "dev.internal".into(), "azureuser".into())],
+            true,
+            Some("my-rg".into()),
+            "default".into(),
+        )
+    }
+}
+
 impl ContentSource for SettingsSource {
     fn capture(&mut self, _width: u16, _height: u16) -> Result<String> {
         Ok("Settings".to_string())
@@ -290,5 +307,166 @@ impl ContentSource for SettingsSource {
             4 => self.render_about(chunks[2], buf),
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::buffer::Buffer;
+
+    #[test]
+    fn test_settings_metadata() {
+        let s = SettingsSource::new_test();
+        assert_eq!(s.name(), "Settings");
+        assert_eq!(s.source_label(), "widget");
+        assert!(s.is_interactive());
+        assert!(s.has_custom_render());
+    }
+
+    #[test]
+    fn test_settings_capture() {
+        let mut s = SettingsSource::new_test();
+        let output = s.capture(80, 24).unwrap();
+        assert_eq!(output, "Settings");
+    }
+
+    #[test]
+    fn test_settings_tab_navigation() {
+        let mut s = SettingsSource::new_test();
+        assert_eq!(s.tab, 0);
+        s.send_keys("Right").unwrap();
+        assert_eq!(s.tab, 1);
+        s.send_keys("Right").unwrap();
+        assert_eq!(s.tab, 2);
+        s.send_keys("Left").unwrap();
+        assert_eq!(s.tab, 1);
+        // Wrap around left
+        s.send_keys("Left").unwrap();
+        assert_eq!(s.tab, 0);
+        s.send_keys("Left").unwrap();
+        assert_eq!(s.tab, 4);
+        // Wrap around right
+        s.send_keys("Right").unwrap();
+        assert_eq!(s.tab, 0);
+    }
+
+    #[test]
+    fn test_settings_list_navigation() {
+        let mut s = SettingsSource::new_test();
+        assert_eq!(s.selected, 0);
+        s.send_keys("Down").unwrap();
+        assert_eq!(s.selected, 1);
+        s.send_keys("Up").unwrap();
+        assert_eq!(s.selected, 0);
+        // j/k navigation
+        s.send_keys("j").unwrap();
+        assert_eq!(s.selected, 1);
+        s.send_keys("k").unwrap();
+        assert_eq!(s.selected, 0);
+    }
+
+    #[test]
+    fn test_settings_add_binding_flow() {
+        let mut s = SettingsSource::new_test();
+        assert_eq!(s.input_mode, InputMode::Browse);
+        s.send_keys("a").unwrap();
+        assert_eq!(s.input_mode, InputMode::InputKey);
+        s.send_keys("3").unwrap();
+        assert_eq!(s.input_mode, InputMode::InputCommand);
+        assert_eq!(s.pending_key, Some('3'));
+        // In InputCommand mode, single chars are typed into the buffer
+        // But 'd','a','t','e' are single chars that go through the `other` branch
+        s.input_buffer.clear();
+        s.input_buffer.push_str("date");
+        assert_eq!(s.input_buffer, "date");
+        // Cancel
+        s.send_keys("Esc").unwrap();
+        assert_eq!(s.input_mode, InputMode::Browse);
+    }
+
+    #[test]
+    fn test_settings_edit_binding() {
+        let mut s = SettingsSource::new_test();
+        s.send_keys("e").unwrap();
+        assert_eq!(s.input_mode, InputMode::InputCommand);
+    }
+
+    #[test]
+    fn test_settings_delete_binding() {
+        let mut s = SettingsSource::new_test();
+        let initial_len = s.bindings.len();
+        s.send_keys("d").unwrap();
+        assert_eq!(s.bindings.len(), initial_len - 1);
+    }
+
+    #[test]
+    fn test_settings_backspace_in_input() {
+        let mut s = SettingsSource::new_test();
+        // Manually set into InputCommand mode with some buffer
+        s.input_mode = InputMode::InputCommand;
+        s.pending_key = Some('5');
+        s.input_buffer = "ab".to_string();
+        s.send_keys("BSpace").unwrap();
+        assert_eq!(s.input_buffer, "a");
+        s.send_keys("BSpace").unwrap();
+        assert_eq!(s.input_buffer, "");
+    }
+
+    #[test]
+    fn test_settings_render_all_tabs() {
+        let s = SettingsSource::new_test();
+        let area = Rect::new(0, 0, 60, 20);
+        let mut buf = Buffer::empty(area);
+        // Render default tab (0 = Bindings)
+        s.render(area, &mut buf);
+
+        // Render each tab
+        for tab in 0..5 {
+            let mut s2 = SettingsSource::new_test();
+            s2.tab = tab;
+            let mut buf2 = Buffer::empty(area);
+            s2.render(area, &mut buf2);
+        }
+    }
+
+    #[test]
+    fn test_settings_render_small_area() {
+        let s = SettingsSource::new_test();
+        let area = Rect::new(0, 0, 10, 3);
+        let mut buf = Buffer::empty(area);
+        // Should not panic
+        s.render(area, &mut buf);
+    }
+
+    #[test]
+    fn test_settings_to_spec() {
+        let s = SettingsSource::new_test();
+        let spec = s.to_spec();
+        match spec {
+            PaneSpec::Plugin { plugin_name, .. } => assert_eq!(plugin_name, "settings"),
+            _ => panic!("expected Plugin spec"),
+        }
+    }
+
+    #[test]
+    fn test_settings_input_mode_flow() {
+        let mut s = SettingsSource::new_test();
+        // Enter edit on selected
+        s.send_keys("Enter").unwrap();
+        assert_eq!(s.input_mode, InputMode::InputCommand);
+        // Confirm edit
+        s.send_keys("Enter").unwrap();
+        assert_eq!(s.input_mode, InputMode::Browse);
+    }
+
+    #[test]
+    fn test_settings_tab_navigation_not_in_input() {
+        let mut s = SettingsSource::new_test();
+        s.send_keys("a").unwrap(); // Go to InputKey mode
+                                   // Right/Left should NOT change tab in input mode
+        let old_tab = s.tab;
+        s.send_keys("Right").unwrap();
+        assert_eq!(s.tab, old_tab);
     }
 }

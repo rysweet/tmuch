@@ -57,3 +57,88 @@ pub fn handle_mouse_drag(app: &mut App, col: u16, row: u16) {
 pub fn handle_mouse_up(app: &mut App) {
     app.drag_state = None;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_mouse_up_clears_drag() {
+        let config = crate::config::Config::default();
+        let mut app = App::new(config);
+        app.drag_state = Some(DragState {
+            split_path: vec![0],
+            direction: SplitDirection::Vertical,
+            parent_area: Rect::new(0, 0, 80, 24),
+        });
+        handle_mouse_up(&mut app);
+        assert!(app.drag_state.is_none());
+    }
+
+    #[test]
+    fn test_mouse_drag_no_drag_state() {
+        let config = crate::config::Config::default();
+        let mut app = App::new(config);
+        // Should not panic when no drag state
+        handle_mouse_drag(&mut app, 40, 12);
+    }
+
+    #[test]
+    fn test_mouse_down_no_panes() {
+        let config = crate::config::Config::default();
+        let mut app = App::new(config);
+        let main_area = Rect::new(0, 0, 80, 24);
+        // Should not panic when no panes
+        handle_mouse_down(&mut app, 10, 10, main_area);
+    }
+
+    #[test]
+    fn test_mouse_drag_vertical_ratio() {
+        let config = crate::config::Config::default();
+        let mut app = App::new(config);
+        app.drag_state = Some(DragState {
+            split_path: vec![],
+            direction: SplitDirection::Vertical,
+            parent_area: Rect::new(0, 0, 100, 24),
+        });
+        handle_mouse_drag(&mut app, 70, 12);
+        // The ratio should have been attempted (even if no layout exists)
+    }
+
+    #[test]
+    fn test_mouse_drag_horizontal_ratio() {
+        let config = crate::config::Config::default();
+        let mut app = App::new(config);
+        app.drag_state = Some(DragState {
+            split_path: vec![],
+            direction: SplitDirection::Horizontal,
+            parent_area: Rect::new(0, 0, 80, 100),
+        });
+        handle_mouse_drag(&mut app, 40, 50);
+    }
+
+    #[test]
+    fn test_mouse_drag_zero_width() {
+        let config = crate::config::Config::default();
+        let mut app = App::new(config);
+        app.drag_state = Some(DragState {
+            split_path: vec![],
+            direction: SplitDirection::Vertical,
+            parent_area: Rect::new(0, 0, 0, 24),
+        });
+        // Should early return, not panic
+        handle_mouse_drag(&mut app, 0, 12);
+    }
+
+    #[test]
+    fn test_mouse_drag_zero_height() {
+        let config = crate::config::Config::default();
+        let mut app = App::new(config);
+        app.drag_state = Some(DragState {
+            split_path: vec![],
+            direction: SplitDirection::Horizontal,
+            parent_area: Rect::new(0, 0, 80, 0),
+        });
+        handle_mouse_drag(&mut app, 40, 0);
+    }
+}
