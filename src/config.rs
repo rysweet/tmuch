@@ -72,6 +72,46 @@ fn config_path() -> PathBuf {
         .join("config.toml")
 }
 
+/// Save the bindings section back to the config file.
+/// Reads the existing config, updates the [bindings] table, and writes it back.
+pub fn save_bindings(bindings: &HashMap<char, String>) -> Result<()> {
+    let path = config_path();
+
+    // Read existing config or start fresh
+    let existing = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        String::new()
+    };
+
+    // Parse as a TOML value so we preserve other sections
+    let mut doc: toml::Value = if existing.is_empty() {
+        toml::Value::Table(toml::map::Map::new())
+    } else {
+        toml::from_str(&existing)?
+    };
+
+    // Build the new bindings table
+    let mut bindings_table = toml::map::Map::new();
+    for (k, v) in bindings {
+        bindings_table.insert(k.to_string(), toml::Value::String(v.clone()));
+    }
+
+    // Update the document
+    if let toml::Value::Table(ref mut table) = doc {
+        table.insert("bindings".to_string(), toml::Value::Table(bindings_table));
+    }
+
+    // Ensure parent directory exists
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let output = toml::to_string_pretty(&doc)?;
+    std::fs::write(&path, output)?;
+    Ok(())
+}
+
 pub fn load() -> Result<Config> {
     let path = config_path();
     let mut config = if path.exists() {
