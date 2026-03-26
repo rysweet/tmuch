@@ -5,12 +5,18 @@
 use anyhow::Result;
 use azlin_azure::auth::AzureAuth;
 use azlin_azure::vm::VmManager;
-use azlin_core::models::{PowerState, VmInfo};
-use azlin_ssh::SshPool;
 use std::path::PathBuf;
 
-use crate::source::ssh_tmux::RemoteConfig;
+use crate::source::ssh_subprocess::RemoteConfig;
 use crate::tmux::SessionInfo;
+
+/// VM info extracted from azlin-azure (avoids needing azlin-core).
+pub struct VmInfo {
+    pub name: String,
+    pub admin_username: Option<String>,
+    pub public_ip: Option<String>,
+    pub private_ip: Option<String>,
+}
 
 /// Config section for azlin integration.
 #[derive(Debug, Default, Clone, serde::Deserialize)]
@@ -20,7 +26,7 @@ pub struct AzlinConfig {
     pub resource_group: Option<String>,
 }
 
-/// Discover running Azure VMs via azlin-azure (synchronous — uses az CLI).
+/// Discover running Azure VMs via azlin-azure (synchronous -- uses az CLI).
 pub fn discover_vms(resource_group: Option<&str>) -> Result<Vec<VmInfo>> {
     let auth = AzureAuth::new().map_err(|e| anyhow::anyhow!("{}", e))?;
     let vm_manager = VmManager::new(&auth);
@@ -37,7 +43,16 @@ pub fn discover_vms(resource_group: Option<&str>) -> Result<Vec<VmInfo>> {
 
     Ok(vms
         .into_iter()
-        .filter(|vm| matches!(vm.power_state, PowerState::Running))
+        .filter(|vm| {
+            // Filter to running VMs -- check power_state field
+            format!("{:?}", vm.power_state).contains("Running")
+        })
+        .map(|vm| VmInfo {
+            name: vm.name.clone(),
+            admin_username: vm.admin_username.clone(),
+            public_ip: vm.public_ip.clone(),
+            private_ip: vm.private_ip.clone(),
+        })
         .collect())
 }
 
@@ -128,14 +143,6 @@ pub fn discover_remote_sessions_sync(resource_group: Option<&str>) -> Result<Vec
     }
 
     Ok(sessions)
-}
-
-/// Async wrapper for compatibility with existing callers.
-pub async fn discover_remote_sessions(
-    _pool: &SshPool,
-    resource_group: Option<&str>,
-) -> Result<Vec<SessionInfo>> {
-    discover_remote_sessions_sync(resource_group)
 }
 
 fn resolve_ssh_key() -> Option<String> {

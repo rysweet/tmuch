@@ -6,6 +6,7 @@ pub enum Mode {
     Normal,
     PaneFocused,
     SessionPicker,
+    CommandEditor,
 }
 
 #[derive(Debug)]
@@ -27,6 +28,11 @@ pub enum Action {
     DiscoverAzlin,
     PickerAddAll,
     PickerScanAzlin,
+    OpenCommandEditor,
+    EditorUp,
+    EditorDown,
+    EditorDelete,
+    EditorClose,
 }
 
 pub fn handle(event: KeyEvent, mode: &Mode, config: &Config) -> Option<Action> {
@@ -34,6 +40,7 @@ pub fn handle(event: KeyEvent, mode: &Mode, config: &Config) -> Option<Action> {
         Mode::Normal => handle_normal(event, config),
         Mode::PaneFocused => handle_pane_focused(event),
         Mode::SessionPicker => handle_picker(event),
+        Mode::CommandEditor => handle_command_editor(event),
     }
 }
 
@@ -46,6 +53,7 @@ fn handle_normal(event: KeyEvent, config: &Config) -> Option<Action> {
             KeyCode::Char('d') => Some(Action::DropPane),
             KeyCode::Char('s') => Some(Action::OpenSessionPicker),
             KeyCode::Char('z') => Some(Action::DiscoverAzlin),
+            KeyCode::Char('e') => Some(Action::OpenCommandEditor),
             _ => None,
         };
     }
@@ -55,6 +63,9 @@ fn handle_normal(event: KeyEvent, config: &Config) -> Option<Action> {
         KeyCode::BackTab => Some(Action::FocusPrev),
         KeyCode::Enter => Some(Action::EnterPaneMode),
         KeyCode::Char('q') => Some(Action::Quit),
+        // Arrow keys for pane navigation
+        KeyCode::Down | KeyCode::Right => Some(Action::FocusNext),
+        KeyCode::Up | KeyCode::Left => Some(Action::FocusPrev),
         KeyCode::Char(c) => {
             // Check command bindings
             config
@@ -85,6 +96,17 @@ fn handle_picker(event: KeyEvent) -> Option<Action> {
         KeyCode::Enter => Some(Action::PickerConfirm),
         KeyCode::Char('a') => Some(Action::PickerAddAll),
         KeyCode::Char('z') => Some(Action::PickerScanAzlin),
+        _ => None,
+    }
+}
+
+fn handle_command_editor(event: KeyEvent) -> Option<Action> {
+    match event.code {
+        KeyCode::Esc => Some(Action::EditorClose),
+        KeyCode::Up | KeyCode::Char('k') => Some(Action::EditorUp),
+        KeyCode::Down | KeyCode::Char('j') => Some(Action::EditorDown),
+        KeyCode::Char('d') => Some(Action::EditorDelete),
+        KeyCode::Char('a') => None, // no-op: hint says edit config file
         _ => None,
     }
 }

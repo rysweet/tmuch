@@ -6,21 +6,67 @@ use crate::session_picker::SessionPicker;
 use crate::source::command::CommandSource;
 use crate::source::http::HttpSource;
 use crate::source::local_tmux::LocalTmuxSource;
-use crate::source::ssh_tmux::{RemoteConfig, SshTmuxSource};
+use crate::source::ssh_subprocess::{RemoteConfig, SshSubprocessSource};
 use crate::source::tail::TailSource;
 use crate::source::{self, NewPaneRequest, PaneSpec};
 use crate::tmux;
 use crate::ui;
 use anyhow::Result;
-use azlin_ssh::SshPool;
 use crossterm::event::{self, Event};
 use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
 use crossterm::ExecutableCommand;
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 use std::io;
-use std::sync::Arc;
 use std::time::Duration;
+
+/// State for the command editor overlay.
+pub struct CommandEditorState {
+    pub entries: Vec<(char, String)>,
+    pub selected: usize,
+}
+
+impl CommandEditorState {
+    pub fn from_config(config: &Config) -> Self {
+        let mut entries: Vec<(char, String)> = config
+            .bindings
+            .iter()
+            .map(|(k, v)| (*k, v.clone()))
+            .collect();
+        entries.sort_by_key(|(k, _)| *k);
+        Self {
+            entries,
+            selected: 0,
+        }
+    }
+
+    pub fn select_next(&mut self) {
+        if !self.entries.is_empty() {
+            self.selected = (self.selected + 1) % self.entries.len();
+        }
+    }
+
+    pub fn select_prev(&mut self) {
+        if !self.entries.is_empty() {
+            self.selected = if self.selected == 0 {
+                self.entries.len() - 1
+            } else {
+                self.selected - 1
+            };
+        }
+    }
+
+    pub fn delete_selected(&mut self) -> Option<char> {
+        if self.entries.is_empty() {
+            return None;
+        }
+        let (key, _) = self.entries.remove(self.selected);
+        if self.selected >= self.entries.len() && !self.entries.is_empty() {
+            self.selected = self.entries.len() - 1;
+        }
+        Some(key)
+    }
+}
 
 pub struct App {
     pub pane_manager: PaneManager,
@@ -28,30 +74,23 @@ pub struct App {
     pub mode: Mode,
     pub picker: SessionPicker,
     pub should_quit: bool,
-    pub tokio_handle: tokio::runtime::Handle,
-    pub ssh_pool: Arc<SshPool>,
+    pub command_editor: Option<CommandEditorState>,
 }
 
 impl App {
-    pub fn new(config: Config, tokio_handle: tokio::runtime::Handle) -> Self {
+    pub fn new(config: Config) -> Self {
         Self {
             pane_manager: PaneManager::new(),
             config,
             mode: Mode::Normal,
             picker: SessionPicker::new(),
             should_quit: false,
-            tokio_handle,
-            ssh_pool: Arc::new(SshPool::default()),
+            command_editor: None,
         }
     }
 
-    pub fn add_local_tmux(&mut self, name: &str, owned: bool) {
-        let source = if owned {
-            // Already created externally
-            LocalTmuxSource::attach(name.to_string())
-        } else {
-            LocalTmuxSource::attach(name.to_string())
-        };
+    pub fn add_local_tmux(&mut self, name: &str, _owned: bool) {
+        let source = LocalTmuxSource::attach(name.to_string());
         self.pane_manager.add(Box::new(source));
     }
 
@@ -105,11 +144,13 @@ impl App {
                     .find(|r| r.name == *remote_name)
                     .ok_or_else(|| anyhow::anyhow!("Remote '{}' not found in config", remote_name))?
                     .clone();
-                let source = SshTmuxSource::new(
-                    remote,
+                let source = SshSubprocessSource::new(
+                    remote.name.clone(),
+                    remote.host.clone(),
+                    remote.user.clone(),
+                    remote.port,
                     session.clone(),
-                    Arc::clone(&self.ssh_pool),
-                    &self.tokio_handle,
+                    remote.poll_interval_ms,
                 );
                 self.pane_manager.add(Box::new(source));
             }
@@ -146,14 +187,30 @@ impl App {
                 poll_interval_ms: 500,
             });
 
-        let source = SshTmuxSource::new(
-            remote,
+        let source = SshSubprocessSource::new(
+            remote.name.clone(),
+            remote.host.clone(),
+            remote.user.clone(),
+            remote.port,
             session.to_string(),
-            Arc::clone(&self.ssh_pool),
-            &self.tokio_handle,
+            remote.poll_interval_ms,
         );
         self.pane_manager.add(Box::new(source));
         Ok(())
+    }
+
+    fn add_remote_session_pane(&mut self, host: &str, session_name: &str) {
+        if let Some(remote) = self.config.remote.iter().find(|r| r.name == host).cloned() {
+            let source = SshSubprocessSource::new(
+                remote.name.clone(),
+                remote.host.clone(),
+                remote.user.clone(),
+                remote.port,
+                session_name.to_string(),
+                remote.poll_interval_ms,
+            );
+            self.pane_manager.add(Box::new(source));
+        }
     }
 
     fn handle_action(&mut self, action: Action) -> Result<()> {
@@ -163,7 +220,6 @@ impl App {
                 self.create_local_tmux(None)?;
             }
             Action::DropPane => {
-                // Pane::drop() calls source.cleanup()
                 self.pane_manager.remove_focused();
             }
             Action::FocusNext => self.pane_manager.focus_next(),
@@ -182,12 +238,8 @@ impl App {
                 if self.config.remote.is_empty() && !self.config.azlin.enabled {
                     self.picker.refresh()?;
                 } else {
-                    self.picker.refresh_with_remotes(
-                        &self.config.remote,
-                        &self.config.azlin,
-                        &self.ssh_pool,
-                        &self.tokio_handle,
-                    )?;
+                    self.picker
+                        .refresh_with_remotes(&self.config.remote, &self.config.azlin)?;
                 }
                 self.mode = Mode::SessionPicker;
             }
@@ -196,19 +248,9 @@ impl App {
             Action::PickerConfirm => {
                 if let Some(session) = self.picker.confirm() {
                     let name = session.name.clone();
-                    if let Some(host) = &session.host {
-                        // Remote session — find matching remote config
-                        if let Some(remote) =
-                            self.config.remote.iter().find(|r| r.name == *host).cloned()
-                        {
-                            let source = SshTmuxSource::new(
-                                remote,
-                                name,
-                                Arc::clone(&self.ssh_pool),
-                                &self.tokio_handle,
-                            );
-                            self.pane_manager.add(Box::new(source));
-                        }
+                    let host = session.host.clone();
+                    if let Some(host) = &host {
+                        self.add_remote_session_pane(host, &name);
                     } else {
                         self.pane_manager
                             .add(Box::new(LocalTmuxSource::attach(name)));
@@ -232,38 +274,24 @@ impl App {
             Action::DiscoverAzlin => {
                 // Open picker pre-populated with azlin VM sessions
                 if self.config.azlin.enabled {
-                    self.picker.refresh_with_remotes(
-                        &self.config.remote,
-                        &self.config.azlin,
-                        &self.ssh_pool,
-                        &self.tokio_handle,
-                    )?;
+                    self.picker
+                        .refresh_with_remotes(&self.config.remote, &self.config.azlin)?;
                 } else {
                     // Even without azlin config, try discovery
                     let azlin_cfg = crate::azlin_integration::AzlinConfig {
                         enabled: true,
                         resource_group: None,
                     };
-                    self.picker.refresh_with_remotes(
-                        &self.config.remote,
-                        &azlin_cfg,
-                        &self.ssh_pool,
-                        &self.tokio_handle,
-                    )?;
+                    self.picker
+                        .refresh_with_remotes(&self.config.remote, &azlin_cfg)?;
                 }
                 self.mode = Mode::SessionPicker;
             }
             Action::PickerScanAzlin => {
                 // Scan azlin VMs and add their sessions to the picker
                 let rg = self.config.azlin.resource_group.as_deref();
-                let result =
-                    self.tokio_handle
-                        .block_on(crate::azlin_integration::discover_remote_sessions(
-                            &self.ssh_pool,
-                            rg,
-                        ));
+                let result = crate::azlin_integration::discover_remote_sessions_sync(rg);
                 if let Ok(remote_sessions) = result {
-                    // Add to existing picker sessions (avoid duplicates)
                     for session in remote_sessions {
                         let already_listed = self
                             .picker
@@ -282,22 +310,37 @@ impl App {
                 for session in &sessions {
                     let name = session.name.clone();
                     if let Some(host) = &session.host {
-                        if let Some(remote) =
-                            self.config.remote.iter().find(|r| r.name == *host).cloned()
-                        {
-                            let source = SshTmuxSource::new(
-                                remote,
-                                name,
-                                Arc::clone(&self.ssh_pool),
-                                &self.tokio_handle,
-                            );
-                            self.pane_manager.add(Box::new(source));
-                        }
+                        self.add_remote_session_pane(host, &name);
                     } else {
                         self.pane_manager
                             .add(Box::new(LocalTmuxSource::attach(name)));
                     }
                 }
+                self.mode = Mode::Normal;
+            }
+            Action::OpenCommandEditor => {
+                self.command_editor = Some(CommandEditorState::from_config(&self.config));
+                self.mode = Mode::CommandEditor;
+            }
+            Action::EditorUp => {
+                if let Some(ref mut editor) = self.command_editor {
+                    editor.select_prev();
+                }
+            }
+            Action::EditorDown => {
+                if let Some(ref mut editor) = self.command_editor {
+                    editor.select_next();
+                }
+            }
+            Action::EditorDelete => {
+                if let Some(ref mut editor) = self.command_editor {
+                    if let Some(key) = editor.delete_selected() {
+                        self.config.bindings.remove(&key);
+                    }
+                }
+            }
+            Action::EditorClose => {
+                self.command_editor = None;
                 self.mode = Mode::Normal;
             }
         }
@@ -308,9 +351,6 @@ impl App {
 /// Run azlin discovery: list all VMs and their tmux sessions, then launch TUI.
 pub fn run_azlin(resource_group: Option<String>) -> Result<()> {
     let config = crate::config::load()?;
-    let rt = tokio::runtime::Runtime::new()?;
-    let handle = rt.handle().clone();
-    let ssh_pool = Arc::new(SshPool::default());
 
     // Use CLI arg, then config, then azlin native config
     let rg = resource_group.or(config.azlin.resource_group.clone());
@@ -357,16 +397,15 @@ pub fn run_azlin(resource_group: Option<String>) -> Result<()> {
     let backend = CrosstermBackend::new(io::stdout());
     let mut terminal = Terminal::new(backend)?;
 
-    let mut app = App::new(config, handle);
-    app.ssh_pool = ssh_pool;
+    let mut app = App::new(config);
 
-    // Create SshSubprocessSource panes (uses system ssh, not russh)
+    // Create SshSubprocessSource panes (uses system ssh)
     for session_info in &discovered {
         let vm_name = session_info.host.as_deref().unwrap_or("unknown");
         let vm = vms.iter().find(|v| v.name == vm_name);
         if let Some(vm) = vm {
             if let Ok(remote) = crate::azlin_integration::vm_to_remote_config(vm) {
-                let source = crate::source::ssh_subprocess::SshSubprocessSource::new(
+                let source = SshSubprocessSource::new(
                     remote.name,
                     remote.host,
                     remote.user,
@@ -385,13 +424,14 @@ pub fn run_azlin(resource_group: Option<String>) -> Result<()> {
         let term_size = terminal.size()?;
         let pane_count = app.pane_manager.count();
         if pane_count > 0 {
+            // Reserve 2 rows: top hint bar + bottom status bar
             let rects = crate::layout::compute(
                 pane_count,
                 ratatui::layout::Rect::new(
                     0,
-                    0,
+                    1,
                     term_size.width,
-                    term_size.height.saturating_sub(1),
+                    term_size.height.saturating_sub(2),
                 ),
             );
             for (i, pane) in app.pane_manager.panes_mut().iter_mut().enumerate() {
@@ -434,17 +474,13 @@ pub fn run(
     layout: Option<String>,
     save_layout: Option<String>,
 ) -> Result<()> {
-    // Create tokio runtime for async SSH operations
-    let rt = tokio::runtime::Runtime::new()?;
-    let handle = rt.handle().clone();
-
     // Setup terminal
     terminal::enable_raw_mode()?;
     io::stdout().execute(EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(io::stdout());
     let mut terminal = Terminal::new(backend)?;
 
-    let mut app = App::new(config, handle);
+    let mut app = App::new(config);
 
     // Load layout if specified
     if let Some(layout_name) = &layout {
@@ -508,13 +544,14 @@ pub fn run(
         let term_size = terminal.size()?;
         let pane_count = app.pane_manager.count();
         if pane_count > 0 {
+            // Reserve 2 rows: top hint bar + bottom status bar
             let rects = crate::layout::compute(
                 pane_count,
                 ratatui::layout::Rect::new(
                     0,
-                    0,
+                    1,
                     term_size.width,
-                    term_size.height.saturating_sub(1),
+                    term_size.height.saturating_sub(2),
                 ),
             );
             for (i, pane) in app.pane_manager.panes_mut().iter_mut().enumerate() {

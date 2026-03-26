@@ -1,5 +1,5 @@
 use crate::azlin_integration::AzlinConfig;
-use crate::source::ssh_tmux::RemoteConfig;
+use crate::source::ssh_subprocess::RemoteConfig;
 use anyhow::Result;
 use serde::Deserialize;
 use std::collections::HashMap;

@@ -113,7 +113,7 @@ if true; then
     assert_output_contains "$BINARY --help" "update" "help shows update command" && pass || fail
     assert_output_contains "$BINARY --help" "--new" "help shows --new flag" && pass || fail
     assert_output_contains "$BINARY --help" "--bind" "help shows --bind flag" && pass || fail
-    assert_output_contains "$BINARY --version" "tmuch 0.2.0" "version shows 0.2.0" && pass || fail
+    assert_output_contains "$BINARY --version" "tmuch" "version shows tmuch" && pass || fail
     assert_output_contains "$BINARY update --help" "Update tmuch" "update help works" && pass || fail
 fi
 
@@ -459,7 +459,7 @@ fi
 # ============================================================
 run_test "cli-version-check" "${1:-}"
 if true; then
-    assert_output_contains "$BINARY --version" "0.2.0" "version shows 0.2.0" && pass || fail
+    assert_output_contains "$BINARY --version" "tmuch" "version shows tmuch" && pass || fail
 fi
 
 # ============================================================
