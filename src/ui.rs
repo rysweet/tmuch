@@ -189,16 +189,36 @@ fn draw_hints_bar(frame: &mut Frame, app: &App, area: Rect) {
             spans.extend(hint("Esc", " Cancel", Color::Red));
         }
         Mode::CommandEditor => {
-            spans.extend(hint("\u{2191}\u{2193}", " Nav", Color::Yellow));
-            spans.push(sep());
-            spans.extend(hint("d", " Delete", Color::Red));
-            spans.push(sep());
-            spans.extend(hint("Esc", " Close", Color::Red));
-            spans.push(sep());
-            spans.push(Span::styled(
-                "Edit ~/.config/tmuch/config.toml to add",
-                Style::default().fg(Color::Rgb(80, 80, 80)),
-            ));
+            use crate::app::EditorInputMode;
+            let input_mode = app.editor_input_mode();
+            match input_mode {
+                EditorInputMode::Browse => {
+                    spans.extend(hint("\u{2191}\u{2193}", " Nav", Color::Yellow));
+                    spans.push(sep());
+                    spans.extend(hint("a", " Add", Color::Green));
+                    spans.push(sep());
+                    spans.extend(hint("e/Enter", " Edit", Color::Cyan));
+                    spans.push(sep());
+                    spans.extend(hint("d", " Delete", Color::Red));
+                    spans.push(sep());
+                    spans.extend(hint("Esc", " Close", Color::Red));
+                }
+                EditorInputMode::InputKey => {
+                    spans.extend(hint("0-9", " Press a key", Color::Green));
+                    spans.push(sep());
+                    spans.extend(hint("Esc", " Cancel", Color::Red));
+                }
+                EditorInputMode::InputCommand => {
+                    spans.extend(hint("Enter", " Save", Color::Green));
+                    spans.push(sep());
+                    spans.extend(hint("Esc", " Cancel", Color::Red));
+                    spans.push(sep());
+                    spans.push(Span::styled(
+                        "Type command...",
+                        Style::default().fg(Color::Rgb(80, 80, 80)),
+                    ));
+                }
+            }
         }
         Mode::AppLauncher => {
             spans.extend(hint("\u{2191}\u{2193}/jk", " Nav", Color::Yellow));
@@ -330,61 +350,155 @@ fn draw_session_picker(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn draw_command_editor(frame: &mut Frame, app: &App, area: Rect) {
+    use crate::app::EditorInputMode;
+
     let editor = match &app.command_editor {
         Some(e) => e,
         None => return,
     };
 
     let w = 50.min(area.width.saturating_sub(4));
-    let entry_count = editor.entries.len();
-    // +3 for title border + bottom border + hint line
-    let h = ((entry_count as u16) + 4)
+    let entry_count = editor.entries.len().max(1); // at least 1 for "(no bindings)"
+                                                   // +4 for title border + bottom border + hint line + input line
+    let h = ((entry_count as u16) + 5)
         .min(area.height.saturating_sub(4))
-        .max(6);
+        .max(8);
     let x = area.x + (area.width.saturating_sub(w)) / 2;
     let y = area.y + (area.height.saturating_sub(h)) / 2;
     let popup = Rect::new(x, y, w, h);
 
     frame.render_widget(Clear, popup);
 
-    let mut items: Vec<ListItem> = editor
-        .entries
-        .iter()
-        .enumerate()
-        .map(|(i, (key, cmd))| {
-            let prefix = if i == editor.selected {
-                "\u{25b6} "
-            } else {
-                "  "
-            };
-            let style = if i == editor.selected {
+    let border_type = parse_border_type(&app.theme.border.style);
+
+    match editor.input_mode {
+        EditorInputMode::InputKey => {
+            // Show a prompt to press a key
+            let block = Block::default()
+                .title(Span::styled(
+                    " Add Binding ",
+                    Style::default().fg(Color::Green),
+                ))
+                .borders(Borders::ALL)
+                .border_type(border_type)
+                .border_style(Style::default().fg(Color::Green));
+
+            let prompt = Paragraph::new(Line::from(vec![Span::styled(
+                "Press a key (0-9):",
                 Style::default()
                     .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(Color::White)
-            };
-            ListItem::new(format!("{}{}: {}", prefix, key, cmd)).style(style)
-        })
-        .collect();
+                    .add_modifier(Modifier::BOLD),
+            )]))
+            .block(block);
 
-    if items.is_empty() {
-        items.push(ListItem::new("  (no bindings)").style(Style::default().fg(Color::DarkGray)));
+            // Use a smaller popup for the key prompt
+            let prompt_h = 3.min(popup.height);
+            let prompt_y = popup.y + (popup.height.saturating_sub(prompt_h)) / 2;
+            let prompt_area = Rect::new(popup.x, prompt_y, popup.width, prompt_h);
+            frame.render_widget(Clear, prompt_area);
+            frame.render_widget(prompt, prompt_area);
+        }
+        EditorInputMode::InputCommand => {
+            // Show existing entries + an input line at bottom
+            let key_label = editor
+                .pending_key
+                .map(|k| k.to_string())
+                .unwrap_or_default();
+
+            let mut items: Vec<ListItem> = editor
+                .entries
+                .iter()
+                .enumerate()
+                .map(|(i, (key, cmd))| {
+                    let prefix = if i == editor.selected {
+                        "\u{25b6} "
+                    } else {
+                        "  "
+                    };
+                    let style = if i == editor.selected {
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(Color::White)
+                    };
+                    ListItem::new(format!("{}{}: {}", prefix, key, cmd)).style(style)
+                })
+                .collect();
+
+            if items.is_empty() {
+                items.push(
+                    ListItem::new("  (no bindings)").style(Style::default().fg(Color::DarkGray)),
+                );
+            }
+
+            // Add separator and input line
+            items.push(ListItem::new(""));
+            let input_line = format!("  {}: {}\u{2588}", key_label, editor.input_buffer);
+            items.push(
+                ListItem::new(input_line).style(
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            );
+
+            let list = List::new(items).block(
+                Block::default()
+                    .title(Span::styled(
+                        " Command Bindings ",
+                        Style::default().fg(Color::Cyan),
+                    ))
+                    .borders(Borders::ALL)
+                    .border_type(border_type)
+                    .border_style(Style::default().fg(Color::Green)),
+            );
+
+            frame.render_widget(list, popup);
+        }
+        EditorInputMode::Browse => {
+            // Normal browse view
+            let mut items: Vec<ListItem> = editor
+                .entries
+                .iter()
+                .enumerate()
+                .map(|(i, (key, cmd))| {
+                    let prefix = if i == editor.selected {
+                        "\u{25b6} "
+                    } else {
+                        "  "
+                    };
+                    let style = if i == editor.selected {
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(Color::White)
+                    };
+                    ListItem::new(format!("{}{}: {}", prefix, key, cmd)).style(style)
+                })
+                .collect();
+
+            if items.is_empty() {
+                items.push(
+                    ListItem::new("  (no bindings)").style(Style::default().fg(Color::DarkGray)),
+                );
+            }
+
+            let list = List::new(items).block(
+                Block::default()
+                    .title(Span::styled(
+                        " Command Bindings ",
+                        Style::default().fg(Color::Cyan),
+                    ))
+                    .borders(Borders::ALL)
+                    .border_type(border_type)
+                    .border_style(Style::default().fg(Color::Cyan)),
+            );
+
+            frame.render_widget(list, popup);
+        }
     }
-
-    let border_type = parse_border_type(&app.theme.border.style);
-    let list = List::new(items).block(
-        Block::default()
-            .title(Span::styled(
-                " Command Bindings ",
-                Style::default().fg(Color::Cyan),
-            ))
-            .borders(Borders::ALL)
-            .border_type(border_type)
-            .border_style(Style::default().fg(Color::Cyan)),
-    );
-
-    frame.render_widget(list, popup);
 }
 
 fn draw_app_launcher(frame: &mut Frame, app: &App, area: Rect) {

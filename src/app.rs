@@ -69,10 +69,21 @@ impl AppLauncherState {
     }
 }
 
+/// Input mode for the command editor overlay.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EditorInputMode {
+    Browse,
+    InputKey,
+    InputCommand,
+}
+
 /// State for the command editor overlay.
 pub struct CommandEditorState {
     pub entries: Vec<(char, String)>,
     pub selected: usize,
+    pub input_mode: EditorInputMode,
+    pub input_buffer: String,
+    pub pending_key: Option<char>,
 }
 
 impl CommandEditorState {
@@ -86,6 +97,9 @@ impl CommandEditorState {
         Self {
             entries,
             selected: 0,
+            input_mode: EditorInputMode::Browse,
+            input_buffer: String::new(),
+            pending_key: None,
         }
     }
 
@@ -157,6 +171,13 @@ impl App {
             plugin_registry: PluginRegistry::new(),
             drag_state: None,
         }
+    }
+
+    pub fn editor_input_mode(&self) -> EditorInputMode {
+        self.command_editor
+            .as_ref()
+            .map(|e| e.input_mode.clone())
+            .unwrap_or(EditorInputMode::Browse)
     }
 
     pub fn add_local_tmux(&mut self, name: &str, _owned: bool) {
@@ -416,7 +437,70 @@ impl App {
                 if let Some(ref mut editor) = self.command_editor {
                     if let Some(key) = editor.delete_selected() {
                         self.config.bindings.remove(&key);
+                        let _ = crate::config::save_bindings(&self.config.bindings);
                     }
+                }
+            }
+            Action::EditorAdd => {
+                if let Some(ref mut editor) = self.command_editor {
+                    editor.input_mode = EditorInputMode::InputKey;
+                    editor.input_buffer.clear();
+                    editor.pending_key = None;
+                }
+            }
+            Action::EditorEdit => {
+                if let Some(ref mut editor) = self.command_editor {
+                    if let Some((key, cmd)) = editor.entries.get(editor.selected).cloned() {
+                        editor.pending_key = Some(key);
+                        editor.input_buffer = cmd;
+                        editor.input_mode = EditorInputMode::InputCommand;
+                    }
+                }
+            }
+            Action::EditorSetKey(c) => {
+                if let Some(ref mut editor) = self.command_editor {
+                    editor.pending_key = Some(c);
+                    editor.input_buffer.clear();
+                    editor.input_mode = EditorInputMode::InputCommand;
+                }
+            }
+            Action::EditorTypeChar(c) => {
+                if let Some(ref mut editor) = self.command_editor {
+                    editor.input_buffer.push(c);
+                }
+            }
+            Action::EditorBackspace => {
+                if let Some(ref mut editor) = self.command_editor {
+                    editor.input_buffer.pop();
+                }
+            }
+            Action::EditorConfirm => {
+                if let Some(ref mut editor) = self.command_editor {
+                    if let Some(key) = editor.pending_key {
+                        let cmd = editor.input_buffer.clone();
+                        if !cmd.is_empty() {
+                            self.config.bindings.insert(key, cmd.clone());
+                            // Update entries list
+                            if let Some(entry) = editor.entries.iter_mut().find(|(k, _)| *k == key)
+                            {
+                                entry.1 = cmd;
+                            } else {
+                                editor.entries.push((key, cmd));
+                                editor.entries.sort_by_key(|(k, _)| *k);
+                            }
+                            let _ = crate::config::save_bindings(&self.config.bindings);
+                        }
+                    }
+                    editor.input_mode = EditorInputMode::Browse;
+                    editor.input_buffer.clear();
+                    editor.pending_key = None;
+                }
+            }
+            Action::EditorCancelInput => {
+                if let Some(ref mut editor) = self.command_editor {
+                    editor.input_mode = EditorInputMode::Browse;
+                    editor.input_buffer.clear();
+                    editor.pending_key = None;
                 }
             }
             Action::EditorClose => {
@@ -786,7 +870,9 @@ pub fn run_azlin(resource_group: Option<String>) -> Result<()> {
             let main_area = Rect::new(0, 1, term_size.width, term_size.height.saturating_sub(2));
             match event::read()? {
                 Event::Key(key) => {
-                    if let Some(action) = keys::handle(key, &app.mode, &app.config) {
+                    if let Some(action) =
+                        keys::handle(key, &app.mode, &app.config, &app.editor_input_mode())
+                    {
                         app.handle_action(action)?;
                     }
                 }
@@ -967,7 +1053,9 @@ pub fn run(
             let main_area = Rect::new(0, 1, term_size.width, term_size.height.saturating_sub(2));
             match event::read()? {
                 Event::Key(key) => {
-                    if let Some(action) = keys::handle(key, &app.mode, &app.config) {
+                    if let Some(action) =
+                        keys::handle(key, &app.mode, &app.config, &app.editor_input_mode())
+                    {
                         app.handle_action(action)?;
                     }
                 }

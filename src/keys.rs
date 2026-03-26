@@ -1,3 +1,4 @@
+use crate::app::EditorInputMode;
 use crate::config::Config;
 use crate::layout::PaneId;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -35,6 +36,13 @@ pub enum Action {
     EditorDown,
     EditorDelete,
     EditorClose,
+    EditorAdd,
+    EditorEdit,
+    EditorSetKey(char),
+    EditorTypeChar(char),
+    EditorBackspace,
+    EditorConfirm,
+    EditorCancelInput,
     #[allow(dead_code)]
     FocusPane(PaneId),
     SplitVertical,
@@ -48,12 +56,17 @@ pub enum Action {
     LauncherCancel,
 }
 
-pub fn handle(event: KeyEvent, mode: &Mode, config: &Config) -> Option<Action> {
+pub fn handle(
+    event: KeyEvent,
+    mode: &Mode,
+    config: &Config,
+    editor_input_mode: &EditorInputMode,
+) -> Option<Action> {
     match mode {
         Mode::Normal => handle_normal(event, config),
         Mode::PaneFocused => handle_pane_focused(event),
         Mode::SessionPicker => handle_picker(event),
-        Mode::CommandEditor => handle_command_editor(event),
+        Mode::CommandEditor => handle_command_editor(event, editor_input_mode),
         Mode::AppLauncher => handle_app_launcher(event),
     }
 }
@@ -120,14 +133,29 @@ fn handle_picker(event: KeyEvent) -> Option<Action> {
     }
 }
 
-fn handle_command_editor(event: KeyEvent) -> Option<Action> {
-    match event.code {
-        KeyCode::Esc => Some(Action::EditorClose),
-        KeyCode::Up | KeyCode::Char('k') => Some(Action::EditorUp),
-        KeyCode::Down | KeyCode::Char('j') => Some(Action::EditorDown),
-        KeyCode::Char('d') => Some(Action::EditorDelete),
-        KeyCode::Char('a') => None, // no-op: hint says edit config file
-        _ => None,
+fn handle_command_editor(event: KeyEvent, input_mode: &EditorInputMode) -> Option<Action> {
+    match input_mode {
+        EditorInputMode::Browse => match event.code {
+            KeyCode::Esc => Some(Action::EditorClose),
+            KeyCode::Up | KeyCode::Char('k') => Some(Action::EditorUp),
+            KeyCode::Down | KeyCode::Char('j') => Some(Action::EditorDown),
+            KeyCode::Char('d') => Some(Action::EditorDelete),
+            KeyCode::Char('a') => Some(Action::EditorAdd),
+            KeyCode::Char('e') | KeyCode::Enter => Some(Action::EditorEdit),
+            _ => None,
+        },
+        EditorInputMode::InputKey => match event.code {
+            KeyCode::Esc => Some(Action::EditorCancelInput),
+            KeyCode::Char(c) if c.is_ascii_digit() => Some(Action::EditorSetKey(c)),
+            _ => None,
+        },
+        EditorInputMode::InputCommand => match event.code {
+            KeyCode::Esc => Some(Action::EditorCancelInput),
+            KeyCode::Enter => Some(Action::EditorConfirm),
+            KeyCode::Backspace => Some(Action::EditorBackspace),
+            KeyCode::Char(c) => Some(Action::EditorTypeChar(c)),
+            _ => None,
+        },
     }
 }
 
