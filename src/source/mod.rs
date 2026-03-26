@@ -1,5 +1,6 @@
 pub mod clock;
 pub mod command;
+pub mod debug_log;
 pub mod http;
 pub mod local_tmux;
 pub mod registry;
@@ -101,6 +102,9 @@ fn default_plugin_config() -> toml::Value {
 /// Parse a `-n` argument into a content source.
 /// Supports prefixes: `watch:cmd:interval`, `tail:path`, `clock:`, or plain tmux command.
 pub fn parse_new_arg(arg: &str) -> NewPaneRequest {
+    if arg == "debug:" || arg == "debug" {
+        return NewPaneRequest::DebugLog;
+    }
     if arg == "settings:" || arg == "settings" {
         return NewPaneRequest::Settings;
     }
@@ -206,6 +210,7 @@ pub enum NewPaneRequest {
     Snake,
     Sparkline { command: String, interval_ms: u64 },
     Settings,
+    DebugLog,
 }
 
 #[cfg(test)]
@@ -382,5 +387,11 @@ mod tests {
             }
             _ => panic!("expected Command"),
         }
+    }
+
+    #[test]
+    fn test_parse_debug() {
+        assert!(matches!(parse_new_arg("debug"), NewPaneRequest::DebugLog));
+        assert!(matches!(parse_new_arg("debug:"), NewPaneRequest::DebugLog));
     }
 }

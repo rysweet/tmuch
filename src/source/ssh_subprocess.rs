@@ -25,6 +25,11 @@ pub struct RemoteConfig {
     pub port: u16,
     #[serde(default = "default_poll")]
     pub poll_interval_ms: u64,
+    /// When set, use `az network bastion ssh` instead of direct SSH.
+    /// Value is the bastion name; host is used as resource group and
+    /// the `host` field becomes the target VM resource ID.
+    #[serde(default)]
+    pub bastion: Option<String>,
 }
 
 fn default_user() -> String {
@@ -126,6 +131,17 @@ pub struct SshSubprocessSource {
     shutdown: Arc<Mutex<bool>>,
     display_name: String,
     label: String,
+    /// When set, use `az network bastion ssh` instead of direct SSH.
+    /// Format: "bastion_name:resource_group:target_resource_id"
+    bastion: Option<BastionInfo>,
+}
+
+/// Info needed for bastion SSH connections.
+#[derive(Debug, Clone)]
+pub struct BastionInfo {
+    pub bastion_name: String,
+    pub resource_group: String,
+    pub target_resource_id: String,
 }
 
 impl SshSubprocessSource {
@@ -137,14 +153,50 @@ impl SshSubprocessSource {
         session: String,
         poll_interval_ms: u64,
     ) -> Self {
+        Self::new_inner(name, host, user, port, session, poll_interval_ms, None)
+    }
+
+    pub fn new_bastion(
+        name: String,
+        host: String,
+        user: String,
+        session: String,
+        poll_interval_ms: u64,
+        bastion: BastionInfo,
+    ) -> Self {
+        Self::new_inner(
+            name,
+            host,
+            user,
+            22,
+            session,
+            poll_interval_ms,
+            Some(bastion),
+        )
+    }
+
+    fn new_inner(
+        name: String,
+        host: String,
+        user: String,
+        port: u16,
+        session: String,
+        poll_interval_ms: u64,
+        bastion: Option<BastionInfo>,
+    ) -> Self {
         let latest_content = Arc::new(Mutex::new(String::new()));
         let error = Arc::new(Mutex::new(None));
         let shutdown = Arc::new(Mutex::new(false));
         let display_name = format!("{}:{}", name, session);
         let label = format!("ssh:{}", name);
 
-        // Establish persistent ControlMaster connection
-        establish_control_master(&host, &user, port);
+        if bastion.is_none() {
+            // Establish persistent ControlMaster connection (direct SSH only)
+            crate::dlog!("ssh: connecting to {}@{}:{}", user, host, port);
+            establish_control_master(&host, &user, port);
+        } else {
+            crate::dlog!("ssh: bastion connection for {}@{}", user, name);
+        }
 
         let content_clone = Arc::clone(&latest_content);
         let error_clone = Arc::clone(&error);
@@ -152,6 +204,7 @@ impl SshSubprocessSource {
         let host_clone = host.clone();
         let user_clone = user.clone();
         let session_clone = session.clone();
+        let bastion_clone = bastion.clone();
 
         std::thread::spawn(move || {
             let interval = Duration::from_millis(poll_interval_ms);
@@ -168,7 +221,11 @@ impl SshSubprocessSource {
                     shell_escape(&session_clone)
                 );
 
-                let result = run_ssh_command(&host_clone, &user_clone, port, &cmd);
+                let result = if let Some(ref bi) = bastion_clone {
+                    run_bastion_command(bi, &user_clone, &cmd)
+                } else {
+                    run_ssh_command(&host_clone, &user_clone, port, &cmd)
+                };
 
                 match result {
                     Ok(output) => {
@@ -176,6 +233,7 @@ impl SshSubprocessSource {
                         *error_clone.lock().unwrap_or_else(|e| e.into_inner()) = None;
                     }
                     Err(e) => {
+                        crate::dlog!("ssh error ({}): {}", session_clone, e);
                         *error_clone.lock().unwrap_or_else(|e| e.into_inner()) =
                             Some(format!("{}", e));
                     }
@@ -195,6 +253,7 @@ impl SshSubprocessSource {
             shutdown,
             display_name,
             label,
+            bastion,
         }
     }
 }
@@ -208,6 +267,40 @@ fn find_ssh_key() -> Option<String> {
         }
     }
     None
+}
+
+/// Run a command on a remote VM via Azure Bastion.
+fn run_bastion_command(bastion: &BastionInfo, user: &str, command: &str) -> Result<String> {
+    let output = std::process::Command::new("az")
+        .args([
+            "network",
+            "bastion",
+            "ssh",
+            "--name",
+            &bastion.bastion_name,
+            "--resource-group",
+            &bastion.resource_group,
+            "--target-resource-id",
+            &bastion.target_resource_id,
+            "--auth-type",
+            "AAD",
+            "--username",
+            user,
+            "--",
+            "-o",
+            "StrictHostKeyChecking=accept-new",
+            "-o",
+            "BatchMode=yes",
+            command,
+        ])
+        .output()?;
+
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("Bastion SSH failed: {}", stderr.trim())
+    }
 }
 
 fn run_ssh_command(host: &str, user: &str, port: u16, command: &str) -> Result<String> {
@@ -255,6 +348,37 @@ pub(crate) fn shell_escape(s: &str) -> String {
     }
 }
 
+/// Create an SshSubprocessSource from a RemoteConfig, handling bastion mode.
+pub fn from_remote_config(remote: &RemoteConfig, session: String) -> SshSubprocessSource {
+    if let Some(ref bastion_str) = remote.bastion {
+        // Parse "bastion_name:resource_group:target_resource_id"
+        let parts: Vec<&str> = bastion_str.splitn(3, ':').collect();
+        if parts.len() == 3 {
+            let bastion = BastionInfo {
+                bastion_name: parts[0].to_string(),
+                resource_group: parts[1].to_string(),
+                target_resource_id: parts[2].to_string(),
+            };
+            return SshSubprocessSource::new_bastion(
+                remote.name.clone(),
+                remote.host.clone(),
+                remote.user.clone(),
+                session,
+                remote.poll_interval_ms,
+                bastion,
+            );
+        }
+    }
+    SshSubprocessSource::new(
+        remote.name.clone(),
+        remote.host.clone(),
+        remote.user.clone(),
+        remote.port,
+        session,
+        remote.poll_interval_ms,
+    )
+}
+
 /// List tmux sessions on a remote host via SSH subprocess.
 pub fn list_remote_sessions(remote: &RemoteConfig) -> Result<Vec<String>> {
     let cmd = "tmux list-sessions -F '#{session_name}' 2>/dev/null || true";
@@ -289,6 +413,7 @@ impl ContentSource for SshSubprocessSource {
         let port = self.port;
         let session = self.session.clone();
         let keys = keys.to_string();
+        let bastion = self.bastion.clone();
 
         std::thread::spawn(move || {
             let cmd = format!(
@@ -296,7 +421,11 @@ impl ContentSource for SshSubprocessSource {
                 shell_escape(&session),
                 shell_escape(&keys)
             );
-            let _ = run_ssh_command(&host, &user, port, &cmd);
+            if let Some(ref bi) = bastion {
+                let _ = run_bastion_command(bi, &user, &cmd);
+            } else {
+                let _ = run_ssh_command(&host, &user, port, &cmd);
+            }
         });
         Ok(())
     }
@@ -321,10 +450,13 @@ impl ContentSource for SshSubprocessSource {
             "tmux resize-window -t {} -A 2>/dev/null; true",
             shell_escape(&self.session)
         );
-        let _ = run_ssh_command(&self.host, &self.user, self.port, &cmd);
-
-        // Tear down the ControlMaster connection
-        teardown_control_master(&self.host, &self.user, self.port);
+        if let Some(ref bi) = self.bastion {
+            let _ = run_bastion_command(bi, &self.user, &cmd);
+        } else {
+            let _ = run_ssh_command(&self.host, &self.user, self.port, &cmd);
+            // Tear down the ControlMaster connection
+            teardown_control_master(&self.host, &self.user, self.port);
+        }
     }
 
     fn to_spec(&self) -> PaneSpec {
@@ -390,9 +522,11 @@ mod tests {
             key: None,
             port: default_port(),
             poll_interval_ms: default_poll(),
+            bastion: None,
         };
         assert_eq!(config.port, 22);
         assert_eq!(config.poll_interval_ms, 500);
         assert!(config.key.is_none());
+        assert!(config.bastion.is_none());
     }
 }

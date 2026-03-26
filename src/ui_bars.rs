@@ -117,7 +117,12 @@ pub fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     let focused_pos = ids.iter().position(|&id| id == focused_id);
 
     let pane_info = if let (Some(pos), Some(pane)) = (focused_pos, app.pane_manager.focused()) {
-        format!("[{}/{}] {}", pos + 1, app.pane_manager.count(), pane.name())
+        format!(
+            "\u{25b6} [{}/{}] {}",
+            pos + 1,
+            app.pane_manager.count(),
+            pane.name()
+        )
     } else {
         format!("[0/{}]", app.pane_manager.count())
     };
@@ -141,7 +146,9 @@ pub fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         Span::raw(" "),
         Span::styled(
             format!("{}{}", pane_info, maximize_indicator),
-            Style::default().fg(parse_color(&theme.status_bar.text)),
+            Style::default()
+                .fg(parse_color(&theme.status_bar.text))
+                .add_modifier(Modifier::BOLD),
         ),
     ];
 

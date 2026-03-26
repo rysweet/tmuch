@@ -61,7 +61,7 @@ impl Default for DisplayConfig {
         Self {
             poll_interval_ms: 150,
             border_style: "rounded".into(),
-            mouse: true,
+            mouse: false,
         }
     }
 }

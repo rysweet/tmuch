@@ -302,6 +302,10 @@ pub(crate) fn handle_new_pane_request(app: &mut App, request: NewPaneRequest) ->
             let source = crate::source::settings::SettingsSource::from_config(&app.config);
             app.pane_manager.add(Box::new(source));
         }
+        NewPaneRequest::DebugLog => {
+            let source = crate::source::debug_log::DebugLogSource::new();
+            app.pane_manager.add(Box::new(source));
+        }
     }
     Ok(())
 }

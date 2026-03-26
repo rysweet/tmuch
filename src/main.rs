@@ -52,9 +52,9 @@ struct Cli {
     #[arg(long = "save-layout", value_name = "NAME")]
     save_layout: Option<String>,
 
-    /// Disable mouse support (fixes key issues on some terminals)
+    /// Enable mouse support (off by default; may break key handling on some terminals)
     #[arg(long)]
-    no_mouse: bool,
+    mouse: bool,
 }
 
 #[derive(Subcommand)]
@@ -158,9 +158,9 @@ fn main() -> anyhow::Result<()> {
         }
     }
 
-    // --no-mouse CLI flag overrides config
-    if cli.no_mouse {
-        config.display.mouse = false;
+    // --mouse CLI flag overrides config to enable mouse
+    if cli.mouse {
+        config.display.mouse = true;
     }
 
     app::run(

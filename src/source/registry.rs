@@ -84,6 +84,13 @@ impl PluginRegistry {
         );
 
         reg.add(
+            "debug",
+            "Debug log — tmuch's own log messages",
+            "debug:",
+            Box::new(|_| Box::new(super::debug_log::DebugLogSource::new())),
+        );
+
+        reg.add(
             "settings",
             "Settings panel — bindings, remotes, theme, about",
             "settings:",

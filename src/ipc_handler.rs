@@ -8,6 +8,7 @@ use crate::tmux;
 
 /// Handle an IPC command, returning a JSON response string.
 pub fn handle_ipc(app: &mut App, cmd: IpcCommand) -> String {
+    crate::dlog!("ipc: {:?}", cmd);
     match cmd {
         IpcCommand::ListPanes => {
             let panes: Vec<serde_json::Value> = app
