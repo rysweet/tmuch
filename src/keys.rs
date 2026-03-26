@@ -59,7 +59,7 @@ fn handle_normal(event: KeyEvent, config: &Config) -> Option<Action> {
             KeyCode::Char('a') => Some(Action::AddPane),
             KeyCode::Char('d') => Some(Action::DropPane),
             KeyCode::Char('s') => Some(Action::OpenSessionPicker),
-            KeyCode::Char('z') => Some(Action::DiscoverAzlin),
+            KeyCode::Char('g') => Some(Action::DiscoverAzlin),
             KeyCode::Char('e') => Some(Action::OpenCommandEditor),
             KeyCode::Char('v') => Some(Action::SplitVertical),
             KeyCode::Char('h') => Some(Action::SplitHorizontal),
