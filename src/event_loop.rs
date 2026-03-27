@@ -363,15 +363,12 @@ fn handle_event(app: &mut App, ev: Event, main_area: Rect) -> Result<()> {
         Event::Key(key) => {
             crate::dlog!("key: {:?}", key);
 
-            // If busy, Esc cancels the background operation
-            if app.busy.is_some() {
-                if key.code == crossterm::event::KeyCode::Esc {
-                    crate::dlog!("Cancelling background operation");
-                    app.busy = None;
-                    app.bg_result = None;
-                    return Ok(());
-                }
-                // Ignore other keys while busy
+            // Esc during busy cancels the background operation.
+            // All other keys work normally — busy is just a visual indicator.
+            if app.busy.is_some() && key.code == crossterm::event::KeyCode::Esc {
+                crate::dlog!("Cancelling background operation");
+                app.busy = None;
+                app.bg_result = None;
                 return Ok(());
             }
 
