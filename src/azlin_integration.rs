@@ -39,18 +39,18 @@ fn default_true() -> bool {
 
 /// Discover running Azure VMs via azlin-azure (synchronous -- uses az CLI).
 pub fn discover_vms(resource_group: Option<&str>) -> Result<Vec<VmInfo>> {
+    // Resource group is required — listing all VMs across all subscriptions
+    // takes 30+ seconds and often times out
+    let resource_group = resource_group.ok_or_else(|| {
+        anyhow::anyhow!("Resource group required for VM discovery. Set [azlin] resource_group in config or default_resource_group in ~/.azlin/config.toml")
+    })?;
+
     let auth = AzureAuth::new().map_err(|e| anyhow::anyhow!("{}", e))?;
     let vm_manager = VmManager::new(&auth);
 
-    let vms = if let Some(rg) = resource_group {
-        vm_manager
-            .list_vms(rg)
-            .map_err(|e| anyhow::anyhow!("{}", e))?
-    } else {
-        vm_manager
-            .list_all_vms()
-            .map_err(|e| anyhow::anyhow!("{}", e))?
-    };
+    let vms = vm_manager
+        .list_vms(resource_group)
+        .map_err(|e| anyhow::anyhow!("{}", e))?;
 
     let subscription_id = vm_manager.subscription_id().to_string();
     crate::dlog!("azlin: discovered {} VMs total", vms.len());
