@@ -171,6 +171,42 @@ pub fn run(
         setup_initial_panes(&mut app, &initial_sessions, &new_commands)?;
     }
 
+    // Auto-discover azlin VMs in background on startup
+    if app.config.azlin.enabled && app.config.azlin.auto_discover {
+        crate::dlog!("Starting background azlin discovery on startup...");
+        app.busy = Some("Discovering Azure VMs...".into());
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        app.bg_result = Some(rx);
+
+        let rg = app.config.azlin.resource_group.clone();
+        let remotes = app.config.remote.clone();
+        let azlin_cfg = app.config.azlin.clone();
+
+        std::thread::spawn(move || {
+            let mut sessions = crate::tmux::list_sessions().unwrap_or_default();
+            for remote in &remotes {
+                if let Ok(names) = crate::source::ssh_subprocess::list_remote_sessions(remote) {
+                    for name in names {
+                        sessions.push(crate::tmux::SessionInfo {
+                            name,
+                            attached: false,
+                            host: Some(remote.name.clone()),
+                        });
+                    }
+                }
+            }
+            if azlin_cfg.enabled || rg.is_some() {
+                if let Ok(remote_sessions) =
+                    crate::azlin_integration::discover_remote_sessions_sync(rg.as_deref())
+                {
+                    sessions.extend(remote_sessions);
+                }
+            }
+            let _ = tx.send(crate::app::BgTaskResult::AzlinSessionsSilent(sessions));
+        });
+    }
+
     let poll_duration = Duration::from_millis(app.config.display.poll_interval_ms);
 
     loop {
@@ -238,15 +274,25 @@ fn check_bg_result(app: &mut App) {
 
     if let Some(result) = completed {
         match result {
-            crate::app::BgTaskResult::AzlinSessions(sessions) => {
+            crate::app::BgTaskResult::AzlinSessionsShowPicker(sessions) => {
                 crate::dlog!(
-                    "Azlin discovery complete: {} sessions found",
+                    "Discovery complete: {} sessions — opening picker",
                     sessions.len()
                 );
                 app.picker.sessions = sessions;
                 app.busy = None;
                 app.bg_result = None;
                 app.mode = crate::keys::Mode::SessionPicker;
+            }
+            crate::app::BgTaskResult::AzlinSessionsSilent(sessions) => {
+                crate::dlog!(
+                    "Background discovery complete: {} sessions ready (Ctrl-S to view)",
+                    sessions.len()
+                );
+                app.picker.sessions = sessions;
+                app.busy = None;
+                app.bg_result = None;
+                // Don't change mode — user can open picker when ready
             }
         }
     }

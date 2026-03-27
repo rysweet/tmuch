@@ -35,7 +35,10 @@ pub struct App {
 
 /// Result from a background task.
 pub enum BgTaskResult {
-    AzlinSessions(Vec<crate::tmux::SessionInfo>),
+    /// Discovery triggered by user action (Ctrl-G) — open picker when done.
+    AzlinSessionsShowPicker(Vec<crate::tmux::SessionInfo>),
+    /// Discovery on startup — pre-populate picker silently.
+    AzlinSessionsSilent(Vec<crate::tmux::SessionInfo>),
 }
 
 impl App {
