@@ -31,6 +31,15 @@ pub fn last_message() -> Option<String> {
     buf.lock().ok()?.back().cloned()
 }
 
+/// Get all log messages (for welcome screen display).
+pub fn all_messages() -> Vec<String> {
+    let buf = global_buffer();
+    buf.lock()
+        .ok()
+        .map(|g| g.iter().cloned().collect())
+        .unwrap_or_default()
+}
+
 /// Convenience macro-style helper: formats and logs.
 #[macro_export]
 macro_rules! dlog {

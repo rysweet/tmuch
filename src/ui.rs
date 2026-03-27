@@ -48,6 +48,11 @@ pub fn draw(frame: &mut Frame, app: &App) {
 
     let focused_id = app.pane_manager.focused_id();
 
+    // When no panes exist, show the activity log in the main area
+    if render_list.is_empty() {
+        draw_welcome_log(frame, app, main_area);
+    }
+
     for (id, rect, pane) in &render_list {
         let is_focused = *id == focused_id;
         let is_remote = pane.source_label() != "local";
@@ -176,6 +181,70 @@ fn draw_busy_overlay(frame: &mut Frame, app: &App, area: Rect) {
                 .border_style(Style::default().fg(Color::Yellow)),
         );
     frame.render_widget(para, popup);
+}
+
+/// Render the debug log messages in the main area when no panes exist.
+fn draw_welcome_log(frame: &mut Frame, app: &App, area: Rect) {
+    use crate::source::debug_log;
+
+    let buf = debug_log::all_messages();
+    let mut lines: Vec<Line> = Vec::new();
+
+    // Header
+    lines.push(Line::from(Span::styled(
+        "  tmuch",
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
+    )));
+    lines.push(Line::from(""));
+
+    if let Some(ref busy) = app.busy {
+        const SPINNER: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+        let s = SPINNER[app.spinner_tick % SPINNER.len()];
+        lines.push(Line::from(Span::styled(
+            format!("  {} {}", s, busy),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )));
+        lines.push(Line::from(""));
+    }
+
+    // Show log messages
+    lines.push(Line::from(Span::styled(
+        "  Activity:",
+        Style::default().fg(Color::Rgb(120, 120, 120)),
+    )));
+
+    for msg in buf
+        .iter()
+        .rev()
+        .take(area.height.saturating_sub(6) as usize)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+    {
+        lines.push(Line::from(Span::styled(
+            format!("    {}", msg),
+            Style::default().fg(Color::Rgb(80, 80, 80)),
+        )));
+    }
+
+    if buf.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "    Use Ctrl-S for sessions, Ctrl-G for azlin, Ctrl-N for apps",
+            Style::default().fg(Color::Rgb(60, 60, 60)),
+        )));
+    }
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(Color::Rgb(40, 40, 40)));
+
+    let paragraph = Paragraph::new(lines).block(block);
+    frame.render_widget(paragraph, area);
 }
 
 fn draw_log_line(frame: &mut Frame, app: &App, area: Rect) {
