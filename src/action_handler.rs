@@ -108,7 +108,7 @@ pub fn handle_action(app: &mut App, action: Action) -> Result<()> {
                     }
                 }
 
-                let _ = tx.send(crate::app::BgTaskResult::AzlinSessions(sessions));
+                let _ = tx.send(crate::app::BgTaskResult::AzlinSessionsShowPicker(sessions));
             });
         }
         Action::PickerAddAll => {

@@ -28,6 +28,13 @@ pub struct AzlinConfig {
     pub resource_group: Option<String>,
     /// Override the default SSH user for azlin VMs (falls back to "azureuser").
     pub default_user: Option<String>,
+    /// Auto-discover azlin VMs on startup (default: true when enabled).
+    #[serde(default = "default_true")]
+    pub auto_discover: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 /// Discover running Azure VMs via azlin-azure (synchronous -- uses az CLI).
