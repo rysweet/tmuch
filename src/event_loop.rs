@@ -172,6 +172,12 @@ pub fn run(
     }
 
     // Auto-discover azlin VMs in background on startup
+    crate::dlog!(
+        "azlin config: enabled={}, auto_discover={}, rg={:?}",
+        app.config.azlin.enabled,
+        app.config.azlin.auto_discover,
+        app.config.azlin.resource_group
+    );
     if app.config.azlin.enabled && app.config.azlin.auto_discover {
         crate::dlog!("Starting background azlin discovery on startup...");
         app.busy = Some("Discovering Azure VMs...".into());

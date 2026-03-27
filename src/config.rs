@@ -122,18 +122,15 @@ pub fn load() -> Result<Config> {
         Config::default()
     };
 
-    // If azlin is enabled but no resource_group set, read from ~/.azlin/config.toml
-    if config.azlin.enabled && config.azlin.resource_group.is_none() {
+    // Auto-configure azlin from ~/.azlin/config.toml if not explicitly set
+    if config.azlin.resource_group.is_none() {
         if let Some(azlin_rg) = read_azlin_default_resource_group() {
             config.azlin.resource_group = Some(azlin_rg);
-        }
-    }
-    // Also: if user hasn't configured azlin but has ~/.azlin/config.toml,
-    // populate the resource_group so `tmuch azlin` and Ctrl-Z work without
-    // requiring explicit config. But don't auto-enable the session picker scan.
-    if !config.azlin.enabled && config.azlin.resource_group.is_none() {
-        if let Some(azlin_rg) = read_azlin_default_resource_group() {
-            config.azlin.resource_group = Some(azlin_rg);
+            // Auto-enable azlin when we have a resource group from azlin config
+            if !config.azlin.enabled {
+                config.azlin.enabled = true;
+                config.azlin.auto_discover = true;
+            }
         }
     }
 
