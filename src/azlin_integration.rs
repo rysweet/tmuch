@@ -92,67 +92,54 @@ pub fn vm_to_remote_config_with(
 
     let key = resolve_ssh_key();
 
-    // If the VM has a public IP, use direct SSH.
-    // Otherwise, try bastion SSH via `az network bastion ssh`.
-    if let Some(ref public_ip) = vm.public_ip {
-        Ok(RemoteConfig {
-            name: vm.name.clone(),
-            host: public_ip.clone(),
-            user,
-            key,
-            port: 22,
-            poll_interval_ms: 500,
-            bastion: None,
-        })
-    } else if let Some(ref rg) = vm.resource_group {
-        // No public IP — attempt bastion
-        let bastion_name = detect_bastion(rg).unwrap_or_default();
-        if bastion_name.is_empty() {
-            // No bastion found either, fall back to private IP
-            let host = vm
-                .private_ip
-                .as_ref()
-                .ok_or_else(|| anyhow::anyhow!("VM '{}' has no IP", vm.name))?
-                .clone();
-            crate::dlog!(
-                "azlin: VM '{}' has no public IP and no bastion, using private IP",
-                vm.name
-            );
-            Ok(RemoteConfig {
-                name: vm.name.clone(),
-                host,
-                user,
-                key,
-                port: 22,
-                poll_interval_ms: 500,
-                bastion: None,
-            })
-        } else {
-            crate::dlog!(
-                "azlin: VM '{}' using bastion '{}' in rg '{}'",
-                vm.name,
-                bastion_name,
-                rg
-            );
-            let vm_rid = build_vm_resource_id(vm)?;
-            // For bastion, host is the bastion_name (used for display), not an IP
-            Ok(RemoteConfig {
-                name: vm.name.clone(),
-                host: vm.private_ip.clone().unwrap_or_default(),
-                user,
-                key,
-                port: 22,
-                poll_interval_ms: 500,
-                bastion: Some(format!("{}:{}:{}", bastion_name, rg, vm_rid)),
-            })
+    // Strategy: prefer public IP > private IP (same vnet) > bastion (slow, last resort)
+    // Private IP is tried first with a quick connectivity check because on the same
+    // vnet it's instant (~0.5s) vs bastion (~13s and often times out).
+    let host = vm
+        .public_ip
+        .as_ref()
+        .or(vm.private_ip.as_ref())
+        .ok_or_else(|| anyhow::anyhow!("VM '{}' has no IP", vm.name))?
+        .clone();
+
+    // Quick connectivity check: can we reach the private IP directly?
+    let direct_works = if vm.public_ip.is_none() {
+        crate::dlog!("azlin: testing direct SSH to {} ({})", vm.name, host);
+        let result = std::process::Command::new("ssh")
+            .args([
+                "-o",
+                "StrictHostKeyChecking=accept-new",
+                "-o",
+                "ConnectTimeout=3",
+                "-o",
+                "BatchMode=yes",
+            ])
+            .args(
+                resolve_ssh_key_path()
+                    .iter()
+                    .flat_map(|k| ["-i".to_string(), k.to_string_lossy().to_string()])
+                    .collect::<Vec<_>>()
+                    .iter()
+                    .map(|s| s.as_str()),
+            )
+            .arg(format!("{}@{}", user, host))
+            .arg("echo ok")
+            .output();
+        match result {
+            Ok(o) if o.status.success() => {
+                crate::dlog!("azlin: direct SSH to {} works!", vm.name);
+                true
+            }
+            _ => {
+                crate::dlog!("azlin: direct SSH to {} failed, will try bastion", vm.name);
+                false
+            }
         }
     } else {
-        // No resource group info, fall back to private IP
-        let host = vm
-            .private_ip
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("VM '{}' has no IP", vm.name))?
-            .clone();
+        true // public IP, always direct
+    };
+
+    if direct_works {
         Ok(RemoteConfig {
             name: vm.name.clone(),
             host,
@@ -162,6 +149,27 @@ pub fn vm_to_remote_config_with(
             poll_interval_ms: 500,
             bastion: None,
         })
+    } else if let Some(ref rg) = vm.resource_group {
+        let bastion_name = detect_bastion(rg).unwrap_or_default();
+        if bastion_name.is_empty() {
+            anyhow::bail!("VM '{}' unreachable: no direct SSH, no bastion", vm.name);
+        }
+        crate::dlog!("azlin: VM '{}' using bastion '{}'", vm.name, bastion_name);
+        let vm_rid = build_vm_resource_id(vm)?;
+        Ok(RemoteConfig {
+            name: vm.name.clone(),
+            host,
+            user,
+            key,
+            port: 22,
+            poll_interval_ms: 500,
+            bastion: Some(format!("{}:{}:{}", bastion_name, rg, vm_rid)),
+        })
+    } else {
+        anyhow::bail!(
+            "VM '{}' unreachable: no direct SSH, no resource group for bastion",
+            vm.name
+        );
     }
 }
 
@@ -179,14 +187,30 @@ pub fn discover_remote_sessions_sync(resource_group: Option<&str>) -> Result<Vec
             }
         };
 
+        // Skip session listing for bastion VMs during discovery —
+        // bastion SSH is too slow (13-15s per VM). Show VM in picker
+        // without session names; sessions discovered on connect.
+        if remote.bastion.is_some() {
+            crate::dlog!("azlin: skipping session probe for bastion VM '{}'", vm.name);
+            sessions.push(SessionInfo {
+                name: format!("{} (bastion)", vm.name),
+                attached: false,
+                host: Some(vm.name.clone()),
+            });
+            continue;
+        }
+
         let list_cmd = "tmux list-sessions -F '#{session_name}' 2>/dev/null || true".to_string();
 
         let output = if let Some(ref bastion_str) = remote.bastion {
-            // Bastion SSH path
+            // Bastion SSH path (shouldn't reach here after the skip above)
             let parts: Vec<&str> = bastion_str.splitn(3, ':').collect();
             if parts.len() == 3 {
-                std::process::Command::new("az")
+                // Wrap bastion SSH in timeout (15s max)
+                std::process::Command::new("timeout")
                     .args([
+                        "15",
+                        "az",
                         "network",
                         "bastion",
                         "ssh",
@@ -205,6 +229,8 @@ pub fn discover_remote_sessions_sync(resource_group: Option<&str>) -> Result<Vec
                         "StrictHostKeyChecking=accept-new",
                         "-o",
                         "BatchMode=yes",
+                        "-o",
+                        "ConnectTimeout=10",
                         &list_cmd,
                     ])
                     .output()
