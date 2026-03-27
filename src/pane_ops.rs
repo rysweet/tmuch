@@ -116,20 +116,37 @@ pub fn add_remote_session_pane(app: &mut App, host: &str, session_name: &str) {
         .or_else(|| app.discovered_remotes.get(host).cloned());
 
     if let Some(remote) = remote {
-        // For bastion VMs, the session_name might be a placeholder like "devo (bastion)".
-        // In that case, try to connect to a default tmux session.
-        let actual_session = if session_name.contains("(bastion)")
+        let is_bastion = remote.bastion.is_some();
+        let is_placeholder = session_name.contains("(bastion)")
             || session_name.contains("(no sessions)")
-            || session_name.contains("(unreachable)")
-        {
-            "azlin".to_string() // default tmux session name
-        } else {
-            session_name.to_string()
-        };
+            || session_name.contains("(unreachable)");
 
-        crate::dlog!("Connecting to {}:{}", host, actual_session);
-        let source = crate::source::ssh_subprocess::from_remote_config(&remote, actual_session);
-        app.pane_manager.add(Box::new(source));
+        if is_bastion || is_placeholder {
+            // Bastion VMs: launch `azlin connect vm:session` in a local tmux pane.
+            // This delegates to azlin's own bastion handling which works with
+            // interactive terminals (AAD auth, proper TTY allocation).
+            let session_target = if is_placeholder {
+                "azlin"
+            } else {
+                session_name
+            };
+            let cmd = format!("azlin connect {}:{}", host, session_target);
+            crate::dlog!("Bastion VM: launching '{}'", cmd);
+            let tmux_name = crate::tmux::generate_session_name();
+            if let Ok(source) =
+                crate::source::local_tmux::LocalTmuxSource::create(tmux_name, Some(&cmd))
+            {
+                app.pane_manager.add(Box::new(source));
+            }
+        } else {
+            // Direct SSH: use SshSubprocessSource for capture polling
+            crate::dlog!("Direct SSH to {}:{}", host, session_name);
+            let source = crate::source::ssh_subprocess::from_remote_config(
+                &remote,
+                session_name.to_string(),
+            );
+            app.pane_manager.add(Box::new(source));
+        }
     } else {
         crate::dlog!("No remote config found for host '{}'", host);
     }
