@@ -380,6 +380,11 @@ pub fn from_remote_config(remote: &RemoteConfig, session: String) -> SshSubproce
 }
 
 /// List tmux sessions on a remote host via SSH subprocess.
+/// Run an arbitrary command on a remote host and return stdout.
+pub fn run_command_on_remote(remote: &RemoteConfig, command: &str) -> Result<String> {
+    run_ssh_command(&remote.host, &remote.user, remote.port, command)
+}
+
 pub fn list_remote_sessions(remote: &RemoteConfig) -> Result<Vec<String>> {
     let cmd = "tmux list-sessions -F '#{session_name}' 2>/dev/null || true";
     let output = run_ssh_command(&remote.host, &remote.user, remote.port, cmd)?;

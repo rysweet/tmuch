@@ -106,10 +106,32 @@ pub fn attach_remote(app: &mut App, host_session: &str) -> Result<()> {
 
 /// Add a remote session pane by host name.
 pub fn add_remote_session_pane(app: &mut App, host: &str, session_name: &str) {
-    if let Some(remote) = app.config.remote.iter().find(|r| r.name == host).cloned() {
-        let source =
-            crate::source::ssh_subprocess::from_remote_config(&remote, session_name.to_string());
+    // Try configured remotes first, then discovered azlin remotes
+    let remote = app
+        .config
+        .remote
+        .iter()
+        .find(|r| r.name == host)
+        .cloned()
+        .or_else(|| app.discovered_remotes.get(host).cloned());
+
+    if let Some(remote) = remote {
+        // For bastion VMs, the session_name might be a placeholder like "devo (bastion)".
+        // In that case, try to connect to a default tmux session.
+        let actual_session = if session_name.contains("(bastion)")
+            || session_name.contains("(no sessions)")
+            || session_name.contains("(unreachable)")
+        {
+            "azlin".to_string() // default tmux session name
+        } else {
+            session_name.to_string()
+        };
+
+        crate::dlog!("Connecting to {}:{}", host, actual_session);
+        let source = crate::source::ssh_subprocess::from_remote_config(&remote, actual_session);
         app.pane_manager.add(Box::new(source));
+    } else {
+        crate::dlog!("No remote config found for host '{}'", host);
     }
 }
 

@@ -99,16 +99,24 @@ pub fn handle_action(app: &mut App, action: Action) -> Result<()> {
                     }
                 }
 
-                // Collect azlin VM sessions
+                // Collect azlin VM sessions + remote configs
+                let mut remote_configs = Vec::new();
                 if azlin_cfg.enabled || rg.is_some() {
-                    if let Ok(remote_sessions) =
-                        crate::azlin_integration::discover_remote_sessions_sync(rg.as_deref())
+                    if let Ok((found_sessions, configs)) =
+                        crate::azlin_integration::discover_with_configs(
+                            rg.as_deref(),
+                            Some(&azlin_cfg),
+                        )
                     {
-                        sessions.extend(remote_sessions);
+                        sessions.extend(found_sessions);
+                        remote_configs = configs;
                     }
                 }
 
-                let _ = tx.send(crate::app::BgTaskResult::AzlinSessionsShowPicker(sessions));
+                let _ = tx.send(crate::app::BgTaskResult::AzlinSessionsShowPicker(
+                    sessions,
+                    remote_configs,
+                ));
             });
         }
         Action::PickerAddAll => {

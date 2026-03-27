@@ -287,6 +287,77 @@ pub fn discover_remote_sessions_sync(resource_group: Option<&str>) -> Result<Vec
     Ok(sessions)
 }
 
+/// Discover sessions AND return the RemoteConfigs for each VM so the picker can connect.
+/// (sessions, vec of (vm_name, remote_config))
+pub type DiscoveryResult = (Vec<SessionInfo>, Vec<(String, RemoteConfig)>);
+
+pub fn discover_with_configs(
+    resource_group: Option<&str>,
+    azlin_config: Option<&AzlinConfig>,
+) -> Result<DiscoveryResult> {
+    let vms = discover_vms(resource_group)?;
+    let mut sessions = Vec::new();
+    let mut configs = Vec::new();
+
+    for vm in &vms {
+        let remote = match vm_to_remote_config_with(vm, azlin_config) {
+            Ok(r) => r,
+            Err(e) => {
+                crate::dlog!("azlin: {}: {}", vm.name, e);
+                continue;
+            }
+        };
+
+        // Cache the remote config for this VM
+        configs.push((vm.name.clone(), remote.clone()));
+
+        // Skip session probing for bastion VMs
+        if remote.bastion.is_some() {
+            crate::dlog!("azlin: skipping session probe for bastion VM '{}'", vm.name);
+            sessions.push(SessionInfo {
+                name: format!("{} (bastion)", vm.name),
+                attached: false,
+                host: Some(vm.name.clone()),
+            });
+            continue;
+        }
+
+        // Direct SSH session listing
+        let list_cmd = "tmux list-sessions -F '#{session_name}' 2>/dev/null || true";
+        match crate::source::ssh_subprocess::run_command_on_remote(&remote, list_cmd) {
+            Ok(stdout) => {
+                let found: Vec<_> = stdout.lines().filter(|l| !l.is_empty()).collect();
+                if found.is_empty() {
+                    // VM reachable but no tmux sessions
+                    sessions.push(SessionInfo {
+                        name: format!("{} (no sessions)", vm.name),
+                        attached: false,
+                        host: Some(vm.name.clone()),
+                    });
+                } else {
+                    for name in found {
+                        sessions.push(SessionInfo {
+                            name: name.to_string(),
+                            attached: false,
+                            host: Some(vm.name.clone()),
+                        });
+                    }
+                }
+            }
+            Err(e) => {
+                crate::dlog!("azlin: {}: SSH failed: {}", vm.name, e);
+                sessions.push(SessionInfo {
+                    name: format!("{} (unreachable)", vm.name),
+                    attached: false,
+                    host: Some(vm.name.clone()),
+                });
+            }
+        }
+    }
+
+    Ok((sessions, configs))
+}
+
 /// Detect a bastion host in the given resource group.
 pub fn detect_bastion(resource_group: &str) -> Result<String> {
     let output = std::process::Command::new("az")

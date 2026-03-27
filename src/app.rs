@@ -31,14 +31,23 @@ pub struct App {
     pub selected_hint: usize,
     /// Background task result receiver (for async operations like azlin discovery)
     pub bg_result: Option<std::sync::mpsc::Receiver<BgTaskResult>>,
+    /// Cached remote configs from azlin discovery (so picker can connect to them)
+    pub discovered_remotes:
+        std::collections::HashMap<String, crate::source::ssh_subprocess::RemoteConfig>,
 }
 
 /// Result from a background task.
 pub enum BgTaskResult {
     /// Discovery triggered by user action (Ctrl-G) — open picker when done.
-    AzlinSessionsShowPicker(Vec<crate::tmux::SessionInfo>),
+    AzlinSessionsShowPicker(
+        Vec<crate::tmux::SessionInfo>,
+        Vec<(String, crate::source::ssh_subprocess::RemoteConfig)>,
+    ),
     /// Discovery on startup — pre-populate picker silently.
-    AzlinSessionsSilent(Vec<crate::tmux::SessionInfo>),
+    AzlinSessionsSilent(
+        Vec<crate::tmux::SessionInfo>,
+        Vec<(String, crate::source::ssh_subprocess::RemoteConfig)>,
+    ),
 }
 
 impl App {
@@ -60,6 +69,7 @@ impl App {
             spinner_tick: 0,
             selected_hint: 0,
             bg_result: None,
+            discovered_remotes: std::collections::HashMap::new(),
         }
     }
 
