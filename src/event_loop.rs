@@ -202,14 +202,19 @@ pub fn run(
                     }
                 }
             }
+            let mut remote_configs = Vec::new();
             if azlin_cfg.enabled || rg.is_some() {
-                if let Ok(remote_sessions) =
-                    crate::azlin_integration::discover_remote_sessions_sync(rg.as_deref())
+                if let Ok((found, configs)) =
+                    crate::azlin_integration::discover_with_configs(rg.as_deref(), Some(&azlin_cfg))
                 {
-                    sessions.extend(remote_sessions);
+                    sessions.extend(found);
+                    remote_configs = configs;
                 }
             }
-            let _ = tx.send(crate::app::BgTaskResult::AzlinSessionsSilent(sessions));
+            let _ = tx.send(crate::app::BgTaskResult::AzlinSessionsSilent(
+                sessions,
+                remote_configs,
+            ));
         });
     }
 
@@ -280,25 +285,30 @@ fn check_bg_result(app: &mut App) {
 
     if let Some(result) = completed {
         match result {
-            crate::app::BgTaskResult::AzlinSessionsShowPicker(sessions) => {
+            crate::app::BgTaskResult::AzlinSessionsShowPicker(sessions, configs) => {
                 crate::dlog!(
                     "Discovery complete: {} sessions — opening picker",
                     sessions.len()
                 );
                 app.picker.sessions = sessions;
+                for (name, cfg) in configs {
+                    app.discovered_remotes.insert(name, cfg);
+                }
                 app.busy = None;
                 app.bg_result = None;
                 app.mode = crate::keys::Mode::SessionPicker;
             }
-            crate::app::BgTaskResult::AzlinSessionsSilent(sessions) => {
+            crate::app::BgTaskResult::AzlinSessionsSilent(sessions, configs) => {
                 crate::dlog!(
                     "Background discovery complete: {} sessions ready (Ctrl-S to view)",
                     sessions.len()
                 );
                 app.picker.sessions = sessions;
+                for (name, cfg) in configs {
+                    app.discovered_remotes.insert(name, cfg);
+                }
                 app.busy = None;
                 app.bg_result = None;
-                // Don't change mode — user can open picker when ready
             }
         }
     }
